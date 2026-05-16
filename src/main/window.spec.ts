@@ -17,7 +17,14 @@ vi.mock("electron", () => {
       opts,
       webContents: fakeWebContents,
       once: vi.fn(),
+      on: vi.fn(),
       show: vi.fn(),
+      getBounds: vi.fn().mockReturnValue({
+        x: 100,
+        y: 200,
+        width: 1280,
+        height: 800,
+      }),
       loadURL: vi.fn().mockResolvedValue(undefined),
     };
   });
@@ -86,5 +93,81 @@ describe("createMainWindow", () => {
       loadURL: ReturnType<typeof vi.fn>;
     };
     expect(instance.loadURL).toHaveBeenCalledWith("http://127.0.0.1:8080/ui/");
+  });
+
+  it("uses persisted bounds when supplied", async () => {
+    const electron = (await import("electron")) as unknown as {
+      BrowserWindow: ReturnType<typeof vi.fn>;
+    };
+    electron.BrowserWindow.mockClear();
+    createMainWindow({
+      url: "http://127.0.0.1:8080/ui/",
+      preloadPath: "/abs/preload/index.js",
+      bounds: { x: 50, y: 60, width: 1400, height: 900 },
+    });
+    const opts = electron.BrowserWindow.mock.calls[0][0] as {
+      x: number | undefined;
+      y: number | undefined;
+      width: number;
+      height: number;
+    };
+    expect(opts.x).toBe(50);
+    expect(opts.y).toBe(60);
+    expect(opts.width).toBe(1400);
+    expect(opts.height).toBe(900);
+  });
+
+  it("subscribes resize/move/close to persist bounds when onBoundsChanged is provided", async () => {
+    const electron = (await import("electron")) as unknown as {
+      BrowserWindow: ReturnType<typeof vi.fn>;
+    };
+    electron.BrowserWindow.mockClear();
+    const onBoundsChanged = vi.fn();
+    createMainWindow({
+      url: "http://127.0.0.1:8080/ui/",
+      preloadPath: "/abs/preload/index.js",
+      onBoundsChanged,
+    });
+    const instance = electron.BrowserWindow.mock.results[0].value as {
+      on: ReturnType<typeof vi.fn>;
+    };
+    const events = instance.on.mock.calls.map((c) => c[0]);
+    expect(events).toContain("resize");
+    expect(events).toContain("move");
+    expect(events).toContain("close");
+  });
+
+  it("debounced bounds handler eventually fires with current getBounds()", async () => {
+    vi.useFakeTimers();
+    try {
+      const electron = (await import("electron")) as unknown as {
+        BrowserWindow: ReturnType<typeof vi.fn>;
+      };
+      electron.BrowserWindow.mockClear();
+      const onBoundsChanged = vi.fn();
+      createMainWindow({
+        url: "http://127.0.0.1:8080/ui/",
+        preloadPath: "/abs/preload/index.js",
+        onBoundsChanged,
+      });
+      const instance = electron.BrowserWindow.mock.results[0].value as {
+        on: ReturnType<typeof vi.fn>;
+      };
+      const resizeHandler = instance.on.mock.calls.find(
+        (c) => c[0] === "resize",
+      )?.[1] as () => void;
+      resizeHandler();
+      resizeHandler();
+      vi.advanceTimersByTime(300);
+      expect(onBoundsChanged).toHaveBeenCalledOnce();
+      expect(onBoundsChanged).toHaveBeenCalledWith({
+        x: 100,
+        y: 200,
+        width: 1280,
+        height: 800,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -9,16 +9,18 @@
 //     channel against `event.senderFrame.url`
 //   - DS4 adds window + tray channels
 //   - DS5 adds updater channels
-//
-// DS1 ships an intentionally empty surface. The preload exposes an
-// empty frozen `nimbusShell` object via `contextBridge.exposeInMainWorld`
-// so the renderer DevTools probe can confirm the bridge is wired and
-// that `process` is undefined (sandbox proof).
 
-export type IpcChannelName = never;
+export const TRAY_SET_STATUS_DOT_CHANNEL = "nimbus:tray:setStatusDot" as const;
+
+export type IpcChannelName = typeof TRAY_SET_STATUS_DOT_CHANNEL;
+
+export type TrayStatusDot = "connected" | "reconnecting" | "offline";
 
 export interface NimbusShell {
-  readonly __version: "ds1";
+  readonly __version: "ds4";
+  readonly tray: {
+    readonly setStatusDot: (state: TrayStatusDot) => Promise<void>;
+  };
 }
 
 declare global {

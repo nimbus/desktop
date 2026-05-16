@@ -13,6 +13,7 @@ directories:
   buildResources: build
 files:
   - "dist/**/*"
+  - "buildResources/**/*"
   - "package.json"
   - "!**/*.spec.{ts,js}"
   - "!**/*.map"

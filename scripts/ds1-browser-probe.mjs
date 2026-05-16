@@ -60,7 +60,7 @@ try {
     sandbox_no_require: probe.requireType === "undefined",
     sandbox_no_buffer: probe.bufferType === "undefined",
     bridge_exists: probe.shellExists,
-    bridge_version: probe.shellVersion === "ds1",
+    bridge_version: probe.shellVersion === "ds4",
     bridge_frozen: probe.shellFrozen === true,
   };
 
