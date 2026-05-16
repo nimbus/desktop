@@ -1,70 +1,155 @@
-# nimbus/desktop
+# nimbus-desktop
 
-Native desktop shell for the Nimbus operator console — Phase 2 of the
-desktop UI initiative.
+Native desktop shell for the [Nimbus](https://github.com/nimbus/nimbus)
+operator console.
 
-This repo wraps the embedded `nimbus-ui` SPA in a signed, notarized,
-auto-updating Electron application. It is **separate from `nimbus/nimbus`**
-on purpose so the desktop release cadence, packaging matrix, and signing
+`nimbus-desktop` is a signed, notarized, auto-updating Electron
+application that wraps the operator console UI served by a local
+`nimbus` instance. It is **separate from `nimbus/nimbus`** by design
+so the desktop release cadence, packaging matrix, and signing
 credentials stay isolated from the core server.
 
-## Status
+## Install
 
-`pending` — scaffold and decisions only. The hello-electron loop lands in
-DS1 of `docs/plans/desktop-shell-plan.md` in the parent repo. See the
-parent plan for the canonical roadmap; this README is intentionally thin.
+| Platform | Download                                         | Notes                                                   |
+| -------- | ------------------------------------------------ | ------------------------------------------------------- |
+| macOS    | `nimbus-desktop-<version>-universal.dmg`         | Universal binary (arm64 + x64), notarized.              |
+| Linux    | `nimbus-desktop-<version>-x86_64.AppImage`        | Self-contained. `chmod +x` and run.                      |
+|          | `nimbus-desktop_<version>_amd64.deb`              | Debian / Ubuntu: `sudo apt install ./*.deb`              |
+|          | `nimbus-desktop-<version>.x86_64.rpm`              | Fedora / RHEL: `sudo dnf install ./*.rpm`                 |
+| Windows  | _(deferred — Azure Trusted Signing onboarding pending; see [decision 002](./docs/decisions/002-windows-code-signing.md))_ |
 
-## Platform rollout
+Latest releases live at
+[github.com/nimbus/desktop/releases](https://github.com/nimbus/desktop/releases).
 
-**Phase 2 first release: macOS + Linux. Windows is deferred to a
-follow-up release.**
+`nimbus-desktop` does **not** ship a Nimbus server. Install
+[`nimbus`](https://github.com/nimbus/nimbus) separately — the shell
+discovers a running instance on launch.
 
-Azure Trusted Signing onboarding requires organization legal
-verification with Microsoft (1–3 week lead time) and is decoupled from
-the first release so the critical path stays on Apple Developer Program
-enrollment + Developer ID Application certificate. The Windows code
-signing decision is captured in
-[`docs/decisions/002-windows-code-signing.md`](./docs/decisions/002-windows-code-signing.md)
-and its scaffolding (secret-name registry, decision document) stays in
-place during the deferral. Flipping Windows from deferred to active is
-a one-line move in `scripts/verify-secrets.sh` once Trusted Signing is
-provisioned.
+## Launch
 
-| Platform | First release? | Signing | Notes |
-| --- | --- | --- | --- |
-| macOS  | yes | Developer ID + notarization | gated on Apple enrollment + cert (DS0B-required) |
-| Linux  | yes | unsigned (community standard) | AppImage / deb / rpm |
-| Windows | **deferred** | Azure Trusted Signing | scaffolded; activation gated on TS onboarding |
+```sh
+# macOS
+open -a nimbus-desktop
 
-## Stack
+# Linux
+nimbus-desktop
 
-- Electron 42.x (Chromium-bundled renderer)
-- electron-builder 26.8.x (canonical packaging)
-- electron-updater 6.8.x (auto-update channel)
-- `@electron/notarize` 3.x (macOS notarization)
-- TypeScript 6, strict mode, ESM only
-- Biome 2.4.x (mirrors `nimbus-ui` lint/format)
-- Vitest (unit) + Playwright (E2E against the packaged shell)
+# Windows
+"%LOCALAPPDATA%\Programs\nimbus-desktop\nimbus-desktop.exe"
+```
+
+On first launch the shell discovers a local `nimbus` instance via
+`server.json` (see [File locations](#file-locations)). If none is
+running, the shell spawns one in the background and waits for it to
+become ready (~1-2 s). The window opens to the operator console at
+`/ui/`.
+
+## Update
+
+Updates ship automatically via
+[`electron-updater`](https://www.electron.build/auto-update) from
+GitHub Releases. The shell polls on launch and at idle, downloads
+in the background, and installs on the next operator-initiated quit
+(never a forced restart). Signature verification is enforced
+end-to-end; an update with a broken signature is rejected.
+
+## Troubleshooting
+
+### "No nimbus server discovered"
+
+The shell could not find a running `nimbus`. Confirm:
+
+```sh
+nimbus --version            # is it installed?
+nimbus start                # start it manually
+ls ~/.config/nimbus/server.json  # was server.json written?
+```
+
+On macOS the discovery path is
+`~/Library/Application Support/nimbus/server.json`. On Windows it is
+`%APPDATA%\nimbus\server.json`.
+
+### "Update download failed"
+
+Re-launch the app. If it persists, check
+`~/Library/Caches/nimbus-desktop-updater/` (macOS),
+`~/.cache/nimbus-desktop-updater/` (Linux), or
+`%LOCALAPPDATA%\nimbus-desktop-updater\` (Windows) — clearing this
+directory forces a fresh download. The shell will fall through to a
+manual-download notification if the auto-update path keeps failing.
+
+### Renderer is blank
+
+Open the developer Help → "Toggle DevTools" entry (production builds
+include DevTools but log only). If the console shows
+`net::ERR_CONNECTION_REFUSED`, `nimbus` is not running on the
+discovered address. Restart with `nimbus start`.
+
+## File locations
+
+| Resource                | macOS                                                                            | Linux                                                | Windows                                                          |
+| ----------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
+| App settings            | `~/Library/Application Support/nimbus-desktop/`                                  | `~/.config/nimbus-desktop/`                          | `%APPDATA%\nimbus-desktop\`                                       |
+| Logs                    | `~/Library/Logs/nimbus-desktop/`                                                  | `~/.config/nimbus-desktop/logs/`                     | `%APPDATA%\nimbus-desktop\logs\`                                  |
+| Updater cache           | `~/Library/Caches/nimbus-desktop-updater/`                                       | `~/.cache/nimbus-desktop-updater/`                   | `%LOCALAPPDATA%\nimbus-desktop-updater\`                          |
+| `server.json` discovery | `~/Library/Application Support/nimbus/server.json` (read-only — owned by nimbus) | `~/.config/nimbus/server.json` (read-only)           | `%APPDATA%\nimbus\server.json` (read-only)                        |
+
+## Uninstall
+
+| macOS   | Drag `nimbus-desktop.app` to Trash. Remove `~/Library/Application Support/nimbus-desktop/`, `~/Library/Logs/nimbus-desktop/`, `~/Library/Caches/nimbus-desktop-updater/`. |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux   | `sudo apt remove nimbus-desktop` (deb) or `sudo dnf remove nimbus-desktop` (rpm). AppImage: delete the file. Remove `~/.config/nimbus-desktop/` and `~/.cache/nimbus-desktop-updater/`. |
+| Windows | Settings → Apps → nimbus-desktop → Uninstall. Remove `%APPDATA%\nimbus-desktop\` and `%LOCALAPPDATA%\nimbus-desktop-updater\`.                                            |
+
+Removing `nimbus-desktop` does **not** remove `nimbus` itself. Uninstall
+`nimbus` via its own [install script](https://github.com/nimbus/nimbus#install)
+if you want to clean up the server too.
+
+## Security posture
+
+See [`docs/security-posture.md`](./docs/security-posture.md) for the
+reviewable summary of how the shell isolates the renderer, locks
+down Electron Fuses, and signs releases. No telemetry is sent by
+default. The renderer is sandboxed, context-isolated, and has
+`nodeIntegration: false`.
+
+## Development
+
+This repo is a Phase 2 deliverable of the desktop initiative.
+The roadmap lives at
+[`docs/plans/desktop-shell-plan.md`](https://github.com/nimbus/nimbus/blob/main/docs/plans/desktop-shell-plan.md)
+in `nimbus/nimbus`.
+
+Stack:
+
+- Electron 42, electron-builder 26, electron-updater 6
+- TypeScript 6 strict, Biome 2.4
+- Vitest (unit), Playwright (packaged-shell E2E)
+
+```sh
+npm ci
+npm run dev              # build main + launch
+npm run test             # vitest unit tests
+npm run package          # local unsigned package (verifies wiring)
+npm run package:mac      # signed if Developer ID is in keychain
+```
+
+Releases are cut by tagging `v*` on `main`; the CI workflow in
+[`.github/workflows/release.yml`](./.github/workflows/release.yml)
+produces signed installers and publishes them. See
+[`docs/release-runbook.md`](./docs/release-runbook.md) for the
+release process and credential rotation.
 
 ## Decisions
 
-External decisions for signing, notarization, and update hosting live in
-[`docs/decisions/`](./docs/decisions/). DS0A captures the chosen paths and
-the unresolved manual procurement items. Secret values never enter this
-repo.
+External decisions for signing, notarization, and update hosting
+live in [`docs/decisions/`](./docs/decisions/):
 
-## Verifying secret presence
+- [001 — Apple signing and notarization](./docs/decisions/001-apple-signing-and-notarization.md)
+- [002 — Windows code signing](./docs/decisions/002-windows-code-signing.md)
+- [003 — Auto-update channel](./docs/decisions/003-auto-update-channel.md)
 
-`scripts/verify-secrets.sh` (DS0B) checks that the required
-`gh secret list` names exist on this repo — it confirms presence only and
-never prints values. Run it after the operator has provisioned the Apple,
-Windows, and update-channel credentials documented in the decision docs:
+## License
 
-```sh
-npm run verify:secrets
-```
-
-## Parent plan
-
-See `docs/plans/desktop-shell-plan.md` and `docs/plans/desktop-ui-plan.md`
-in `nimbus/nimbus` for the full DS0–DS10 roadmap.
+Same as `nimbus/nimbus`. See the parent repo for license details.
