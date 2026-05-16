@@ -1,10 +1,16 @@
 name: e2e
 
 # DS7 packaged-shell E2E gate. Builds production installers per
-# platform, downloads a matching `nimbus` binary from the latest
-# nimbus/nimbus release, points the shell at it via
-# NIMBUS_DESKTOP_NIMBUS_BIN, then runs the Playwright specs against
-# the packaged Electron binary.
+# platform, builds the matching `nimbus` binary from a sibling
+# checkout of nimbus/nimbus@main (rusty_v8 ships prebuilt static
+# libs, so this is not a V8-from-source build), points the shell
+# at it via NIMBUS_DESKTOP_NIMBUS_BIN, then runs the Playwright
+# specs against the packaged Electron binary.
+#
+# Building nimbus from source rather than downloading a tagged
+# release keeps the shell tested against tip-of-main nimbus —
+# critical pre-launch when UI changes (DU items) land between
+# releases and the shell's /ui/ surface depends on them.
 #
 # The specs exercise the full DS2/DS3/DS7 surface:
 #   - critical-path.spec.ts: shell connects to a pre-running nimbus,
@@ -12,10 +18,6 @@ name: e2e
 #   - lifecycle.spec.ts: shell spawns nimbus when none is running,
 #     reaps it on shutdown, and relaunches against the same scratch
 #     state without orphaning the previous server.
-#
-# The shell binary itself is the canonical production output — we run
-# the same `electron-builder --publish=never` pipeline package.yml
-# uses, then point the harness at the unpacked binary inside `release/`.
 
 on:
   push:
@@ -31,15 +33,11 @@ jobs:
         include:
           - os: macos-14
             target: package:mac
-            nimbus_asset: nimbus_darwin_arm64.tar.gz
-            nimbus_archive_kind: tar
             nimbus_bin_subpath: nimbus
             name: mac-arm64
             e2e_runner_prefix: ""
           - os: ubuntu-24.04
             target: package:linux
-            nimbus_asset: nimbus_linux_x86_64.tar.gz
-            nimbus_archive_kind: tar
             nimbus_bin_subpath: nimbus
             name: linux-x64
             # GitHub Actions Linux runners have no display; the packaged
@@ -49,59 +47,69 @@ jobs:
             e2e_runner_prefix: "xvfb-run -a"
           - os: windows-2022
             target: package:win
-            nimbus_asset: nimbus_windows_x86_64.zip
-            nimbus_archive_kind: zip
             nimbus_bin_subpath: nimbus.exe
             name: win-x64
             e2e_runner_prefix: ""
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # Match the nimbus release workflow's git-fetch strategy so
+      # rusty_v8's large submodules can resolve through the git CLI
+      # on Windows long-path filesystems.
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout desktop
+        uses: actions/checkout@v4
+
+      - name: Checkout nimbus (sibling source for build)
+        uses: actions/checkout@v4
+        with:
+          repository: nimbus/nimbus
+          path: nimbus-src
+          fetch-depth: 1
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
+
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
 
-      - name: Download nimbus binary from latest nimbus/nimbus release
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build (nimbus)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nimbus-src -> target
+          key: nimbus-${{ matrix.name }}
+
+      - name: Build nimbus from source
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: ${{ github.workspace }}/nimbus-src
         run: |
           set -euo pipefail
-          tag=$(gh release view --repo nimbus/nimbus --json tagName --jq .tagName)
-          echo "nimbus tag: $tag"
-          mkdir -p .nimbus-bin
-          gh release download "$tag" \
-            --repo nimbus/nimbus \
-            --pattern '${{ matrix.nimbus_asset }}' \
-            --dir .nimbus-bin
-          case "${{ matrix.nimbus_archive_kind }}" in
-            tar)
-              tar -xzf ".nimbus-bin/${{ matrix.nimbus_asset }}" -C .nimbus-bin
-              ;;
-            zip)
-              unzip -o ".nimbus-bin/${{ matrix.nimbus_asset }}" -d .nimbus-bin
-              ;;
-          esac
-          bin_path=".nimbus-bin/${{ matrix.nimbus_bin_subpath }}"
+          cargo --version
+          rustc --version
+          # nimbus-bin is the binary crate; build it in release mode to
+          # match the dev-loop convention the helper looks for.
+          cargo build --release -p nimbus-bin
+          # The binary lives at target/release/${nimbus_bin_subpath};
+          # resolve to an absolute path so the spawn-detached child
+          # inherits a path that survives the shell's scratch cwd.
+          bin_path="target/release/${{ matrix.nimbus_bin_subpath }}"
           if [ ! -f "$bin_path" ]; then
-            echo "Expected nimbus binary at $bin_path after extraction:"
-            ls -la .nimbus-bin
+            echo "Expected nimbus binary at $bin_path after build:"
+            ls -la target/release | head -20
             exit 1
           fi
-          chmod +x "$bin_path" || true
-          # Resolve to an absolute path so the spawn-detached child
-          # inherits a path that survives the shell's scratch cwd.
           abs_path="$(cd "$(dirname "$bin_path")" && pwd)/$(basename "$bin_path")"
           echo "NIMBUS_DESKTOP_NIMBUS_BIN=$abs_path" >> "$GITHUB_ENV"
-          echo "resolved nimbus binary: $abs_path"
+          echo "built nimbus binary: $abs_path"
           "$abs_path" --version || true
 
       - name: Install Linux GUI deps for packaged Electron
