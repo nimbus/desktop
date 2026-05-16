@@ -192,6 +192,17 @@ jobs:
       # workflow trigger uploading to a live release.
       - name: Package + publish
         shell: bash
+        env:
+          # Surface electron-builder + @electron/osx-sign internals
+          # when DESKTOP_APPLE_CERT_P12 is present. The dryrun-3
+          # mac job proved CSC_LINK holds a valid Developer ID
+          # Application identity (see the "Diagnose macOS .p12
+          # contents" step) yet electron-builder still logs
+          # `falling back to ad-hoc signature` with no reason — we
+          # need the debug-level lines from `app-builder-lib` to
+          # find out what its internal `security import` /
+          # `find-identity` pipeline is rejecting.
+          DEBUG: "electron-builder,app-builder*,electron/osx-sign*,@electron/osx-sign*"
         run: |
           set -euo pipefail
           # The package:* scripts in package.json end with
