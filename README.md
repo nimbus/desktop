@@ -14,6 +14,28 @@ credentials stay isolated from the core server.
 DS1 of `docs/plans/desktop-shell-plan.md` in the parent repo. See the
 parent plan for the canonical roadmap; this README is intentionally thin.
 
+## Platform rollout
+
+**Phase 2 first release: macOS + Linux. Windows is deferred to a
+follow-up release.**
+
+Azure Trusted Signing onboarding requires organization legal
+verification with Microsoft (1–3 week lead time) and is decoupled from
+the first release so the critical path stays on Apple Developer Program
+enrollment + Developer ID Application certificate. The Windows code
+signing decision is captured in
+[`docs/decisions/002-windows-code-signing.md`](./docs/decisions/002-windows-code-signing.md)
+and its scaffolding (secret-name registry, decision document) stays in
+place during the deferral. Flipping Windows from deferred to active is
+a one-line move in `scripts/verify-secrets.sh` once Trusted Signing is
+provisioned.
+
+| Platform | First release? | Signing | Notes |
+| --- | --- | --- | --- |
+| macOS  | yes | Developer ID + notarization | gated on Apple enrollment + cert (DS0B-required) |
+| Linux  | yes | unsigned (community standard) | AppImage / deb / rpm |
+| Windows | **deferred** | Azure Trusted Signing | scaffolded; activation gated on TS onboarding |
+
 ## Stack
 
 - Electron 42.x (Chromium-bundled renderer)

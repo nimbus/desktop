@@ -1,9 +1,40 @@
 # 002 — Windows code signing
 
-- **Status:** accepted (DS0A)
+- **Status:** accepted (DS0A); **activation deferred** — see below
 - **Date:** 2026-05-15
 - **Decision owner:** `nimbus/desktop` maintainers
 - **Parent plan:** `nimbus/nimbus:docs/plans/desktop-shell-plan.md` → DS0A
+
+## Deferral status
+
+**First release ships macOS + Linux only. Windows is intentionally
+deferred to a follow-up release.**
+
+Rationale: Azure Trusted Signing onboarding requires organization legal
+verification with Microsoft (1–3 week lead time) before any artifact
+can be signed. Decoupling it from the first release keeps the critical
+path on Apple Developer Program enrollment + Developer ID Application
+certificate, both of which are operator-driven on a much shorter
+horizon. The decision below stays the chosen path; only its activation
+is staged.
+
+While deferred:
+
+- The decision and secret-name registry below remain authoritative —
+  flipping Windows from deferred to active is a one-line move in
+  `scripts/verify-secrets.sh` (relocate `DEFERRED_WINDOWS_SECRETS`
+  into `REQUIRED_SECRETS`) once Trusted Signing is provisioned.
+- `scripts/verify-secrets.sh` reports the Windows secret names but
+  does **not** fail DS0B on their absence.
+- DS6 packaging may produce an unsigned Windows artifact for internal
+  smoke testing, but no signed Windows binary leaves the build.
+- DS8 (code signing) and DS9 (release CI) bring up macOS first; their
+  Windows lanes activate when this decision flips to "accepted —
+  active".
+
+This deferral block is the only authoritative statement that Windows
+ships late; the rest of the document remains correct as written and
+will not need a rewrite when activation lands.
 
 ## Context
 
