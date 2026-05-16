@@ -1,0 +1,253 @@
+name: release
+
+# DS9 release CI. Triggered by a push of a `v*` tag against
+# `nimbus/desktop`, builds + signs + notarizes + publishes the
+# desktop shell installers to GitHub Releases. The renderer
+# (the operator console UI) is served by nimbus at `/ui/`; this
+# workflow does NOT package the renderer — it only produces the
+# Electron shell that connects to a separately-installed nimbus.
+#
+# Per-platform pipeline:
+#   macOS: keychain-import P12 -> sign with Developer ID -> notarize
+#          via App Store Connect API key (decision 001) -> staple
+#          ticket -> publish DMG + ZIP to GitHub Releases.
+#   Linux: package AppImage + deb + rpm unsigned (community standard;
+#          decision per `distribution-plan.md`) -> publish.
+#   Windows: package NSIS x64 + arm64 unsigned while decision 002
+#            ("accepted (DS0A); activation deferred") holds.
+#            scripts/sign-windows.cjs no-ops without the Azure
+#            Trusted Signing env vars.
+#
+# Dry-run mode: pushing a tag matching `v0.0.0-dryrun-*` produces
+# artifacts and uploads them to a draft release that the operator
+# can inspect + delete. This proves the wiring without committing
+# to a real version. Real release tags (v0.x.y, v1.x.y) publish a
+# non-draft release and add the auto-update manifests.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.0.0-dryrun-1). Created if not present."
+        required: true
+        type: string
+
+permissions:
+  # Required for electron-builder publish=github to create releases
+  # and upload assets. Avoids needing a fine-grained PAT
+  # (DESKTOP_GH_RELEASE_TOKEN); the default GITHUB_TOKEN with
+  # contents:write satisfies the publish path per decision 003.
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: package:mac
+            name: mac-universal
+          - os: ubuntu-24.04
+            target: package:linux
+            name: linux-x64
+          - os: windows-2022
+            target: package:win
+            name: win-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      # GH_TOKEN is what electron-builder reads for the github
+      # publish provider. Pinned here so every step in the job
+      # (including the publish step inside `electron-builder`) sees
+      # the same token without an explicit `with:` block.
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout desktop
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+
+      # ── macOS-only signing prep ────────────────────────────────
+      # Decode DESKTOP_APPLE_CERT_P12 into a temp file and point
+      # electron-builder at it via CSC_LINK + CSC_KEY_PASSWORD.
+      # electron-builder handles the temp-keychain import +
+      # set-key-partition-list dance internally — we do not need
+      # to invoke `security` directly here. The cert + password
+      # never leave the runner's temp dir; both are cleaned by
+      # GitHub Actions on job completion.
+      - name: Prepare macOS signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          DESKTOP_APPLE_CERT_P12: ${{ secrets.DESKTOP_APPLE_CERT_P12 }}
+          DESKTOP_APPLE_CERT_P12_PASSWORD: ${{ secrets.DESKTOP_APPLE_CERT_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DESKTOP_APPLE_CERT_P12:-}" ]; then
+            echo "DESKTOP_APPLE_CERT_P12 not present; macOS will package unsigned"
+            exit 0
+          fi
+          cert_path="$RUNNER_TEMP/desktop-apple-cert.p12"
+          # base64 -d on macOS is happy with single-line input; the
+          # DS0B-uploaded secret was produced by `openssl base64 -A`.
+          printf '%s' "$DESKTOP_APPLE_CERT_P12" | base64 -d > "$cert_path"
+          chmod 600 "$cert_path"
+          echo "CSC_LINK=$cert_path" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=$DESKTOP_APPLE_CERT_P12_PASSWORD" >> "$GITHUB_ENV"
+          # Keep auto-discovery off so electron-builder uses
+          # CSC_LINK exclusively — no surprises from the runner's
+          # default keychain. The DS6 package-only matrix uses the
+          # same posture for consistency.
+          echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+
+      - name: Prepare Apple notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          DESKTOP_APPLE_API_KEY: ${{ secrets.DESKTOP_APPLE_API_KEY }}
+          DESKTOP_APPLE_API_KEY_ID: ${{ secrets.DESKTOP_APPLE_API_KEY_ID }}
+          DESKTOP_APPLE_API_ISSUER: ${{ secrets.DESKTOP_APPLE_API_ISSUER }}
+          DESKTOP_APPLE_TEAM_ID: ${{ secrets.DESKTOP_APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DESKTOP_APPLE_API_KEY:-}" ]; then
+            echo "DESKTOP_APPLE_API_KEY not present; notarize.cjs will no-op"
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/desktop-apple-api-key.p8"
+          printf '%s' "$DESKTOP_APPLE_API_KEY" | base64 -d > "$key_path"
+          chmod 600 "$key_path"
+          # scripts/notarize.cjs reads these four env vars; the .p8
+          # path is the only derived value, the rest forward verbatim.
+          echo "DESKTOP_APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "DESKTOP_APPLE_API_KEY_ID=$DESKTOP_APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+          echo "DESKTOP_APPLE_API_ISSUER=$DESKTOP_APPLE_API_ISSUER" >> "$GITHUB_ENV"
+          echo "DESKTOP_APPLE_TEAM_ID=$DESKTOP_APPLE_TEAM_ID" >> "$GITHUB_ENV"
+
+      # ── Package + sign + notarize + publish ────────────────────
+      # `--publish onTagOrDraft` tells electron-builder to publish
+      # only on tag pushes (or explicit draft requests), never on
+      # branch pushes — defense-in-depth against an accidental
+      # workflow trigger uploading to a live release.
+      - name: Package + publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The package:* scripts in package.json end with
+          # `--publish=never`. Override to `onTagOrDraft` by calling
+          # electron-builder directly with the resolved target flag.
+          case "${{ matrix.target }}" in
+            package:mac)   flag="--mac" ;;
+            package:linux) flag="--linux" ;;
+            package:win)   flag="--win" ;;
+            *) echo "unknown matrix target: ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          npm run build:main
+          npx electron-builder $flag --publish onTagOrDraft
+
+      - name: Audit installer sizes
+        run: node scripts/check-installer-sizes.cjs release
+
+      # DS3 + DS6 + DS8 final fuse gate: read the fuse strip from the
+      # packed Electron binary on each platform and assert it matches
+      # the production posture defined in `scripts/prepublish-check.cjs`.
+      # Hard-fails the release if any required fuse drifted.
+      - name: Prepublish fuse audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            macOS)
+              bin="release/mac-universal/nimbus-desktop.app/Contents/MacOS/nimbus-desktop"
+              ;;
+            Linux)
+              bin="release/linux-unpacked/nimbus-desktop"
+              ;;
+            Windows)
+              # electron-builder produces per-arch unpacked dirs; audit
+              # whichever one(s) exist. node accepts forward slashes
+              # on Windows for path args.
+              for d in release/win-unpacked release/win-arm64-unpacked; do
+                if [ -f "$d/nimbus-desktop.exe" ]; then
+                  node scripts/prepublish-check.cjs "$d/nimbus-desktop.exe"
+                fi
+              done
+              exit 0
+              ;;
+          esac
+          node scripts/prepublish-check.cjs "$bin"
+
+      # ── macOS post-flight: signature + notarization verification ─
+      # The DS8 contract bullet for verification: `spctl --assess`
+      # reports `accepted source=Notarized Developer ID` and
+      # `stapler validate` succeeds. Both run only when DS0B
+      # credentials were surfaced this run — dry-run packaging
+      # without secrets skips this step rather than failing it.
+      - name: Verify macOS signature + notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CSC_LINK:-}" ]; then
+            echo "no signing credentials this run; skipping signature audit"
+            exit 0
+          fi
+          app="release/mac-universal/nimbus-desktop.app"
+          if [ ! -d "$app" ]; then
+            echo "Expected packed .app at $app:"
+            ls -la release/ || true
+            exit 1
+          fi
+          echo "::group::codesign --verify --deep --strict --verbose=2"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "::endgroup::"
+          echo "::group::spctl --assess --type execute --verbose=4"
+          spctl --assess --type execute --verbose=4 "$app"
+          echo "::endgroup::"
+          if [ -n "${DESKTOP_APPLE_API_KEY_PATH:-}" ]; then
+            dmg=$(find release -maxdepth 1 -type f -name "*.dmg" | head -1)
+            if [ -n "$dmg" ]; then
+              echo "::group::stapler validate $dmg"
+              xcrun stapler validate "$dmg"
+              echo "::endgroup::"
+            fi
+            echo "::group::stapler validate $app"
+            xcrun stapler validate "$app"
+            echo "::endgroup::"
+          else
+            echo "no notarization credentials this run; skipping stapler audit"
+          fi
+
+      - name: Inventory release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::release/ contents"
+          ls -la release/ || true
+          echo "::endgroup::"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nimbus-desktop-${{ matrix.name }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/latest-*.yml
+          if-no-files-found: error
+          retention-days: 30
