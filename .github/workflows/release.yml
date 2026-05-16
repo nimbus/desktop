@@ -80,13 +80,27 @@ jobs:
       - run: npm run test
 
       # ── macOS-only signing prep ────────────────────────────────
-      # Decode DESKTOP_APPLE_CERT_P12 into a temp file and point
-      # electron-builder at it via CSC_LINK + CSC_KEY_PASSWORD.
-      # electron-builder handles the temp-keychain import +
-      # set-key-partition-list dance internally — we do not need
-      # to invoke `security` directly here. The cert + password
-      # never leave the runner's temp dir; both are cleaned by
-      # GitHub Actions on job completion.
+      # Decode DESKTOP_APPLE_CERT_P12 and import it into a job-scoped
+      # custom keychain with the FULL codesigning partition list, then
+      # let electron-builder auto-discover the identity from there.
+      #
+      # Background — why we cannot just hand electron-builder a .p12
+      # via CSC_LINK: electron-builder 26.x runs `security
+      # set-key-partition-list -S apple-tool:,apple:` after importing,
+      # WITHOUT `codesign:` in the partition list. On macOS 14 the
+      # codesign tool then cannot access the imported private key, so
+      # `find-identity -v -p codesigning` returns empty and
+      # electron-builder silently logs `falling back to ad-hoc
+      # signature` (proven on tag v0.0.0-dryrun-4 with DEBUG=
+      # electron-builder enabled: the import step succeeds with "1
+      # identity imported" but no codesigning-eligible identity is
+      # detectable). Apple notarytool then rejects the ad-hoc-signed
+      # binary 90s later.
+      #
+      # We work around that by managing the keychain ourselves with
+      # the correct ACLs and letting electron-builder auto-discover,
+      # which is the canonical pattern for self-hosted-style signing
+      # on GH macOS runners.
       - name: Prepare macOS signing
         if: runner.os == 'macOS'
         shell: bash
@@ -104,62 +118,69 @@ jobs:
           # DS0B-uploaded secret was produced by `openssl base64 -A`.
           printf '%s' "$DESKTOP_APPLE_CERT_P12" | base64 -d > "$cert_path"
           chmod 600 "$cert_path"
-          echo "CSC_LINK=$cert_path" >> "$GITHUB_ENV"
-          echo "CSC_KEY_PASSWORD=$DESKTOP_APPLE_CERT_P12_PASSWORD" >> "$GITHUB_ENV"
-          # Keep auto-discovery off so electron-builder uses
-          # CSC_LINK exclusively — no surprises from the runner's
-          # default keychain. The DS6 package-only matrix uses the
-          # same posture for consistency.
-          echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+          # Build a job-scoped keychain that codesign + electron-builder
+          # can both reach. Random password per run; never exposed
+          # outside this step.
+          kc="$RUNNER_TEMP/desktop-build.keychain-db"
+          kc_pw="$(openssl rand -hex 16)"
+          security create-keychain -p "$kc_pw" "$kc"
+          # 6-hour lock timeout — long enough for the package + sign +
+          # notarize loop, short enough that the auto-cleanup on job
+          # completion is effectively immediate.
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kc_pw" "$kc"
+          # Add our keychain to the user search list so electron-builder's
+          # `security find-identity -v -p codesigning` (which it runs
+          # without a keychain argument under auto-discovery) can see
+          # the identity.
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          # `-T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productbuild`
+          # authorizes those tools to access the private key without
+          # interactive prompts; combined with the partition list
+          # below this is what makes `find-identity -p codesigning`
+          # actually find the imported identity.
+          security import "$cert_path" -k "$kc" \
+            -P "$DESKTOP_APPLE_CERT_P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/productbuild
+          # `codesign:` here is the key difference vs electron-builder's
+          # built-in import path (which omits `codesign:` and is what
+          # caused the ad-hoc fallback on dryrun-2..dryrun-4).
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$kc_pw" "$kc" >/dev/null
+          # Hand the keychain to subsequent steps for cleanup + audit.
+          echo "DESKTOP_BUILD_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+          # Tell electron-builder to auto-discover the identity from
+          # the search list (= our custom keychain). Do NOT set
+          # CSC_LINK here — that would trigger electron-builder's
+          # internal import with the wrong partition list.
+          echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
+          # Pin the cert by name so electron-builder picks ours even
+          # if the runner's default keychain happens to contain
+          # another Developer ID identity. Subject from dryrun-3 was
+          # "Developer ID Application: Jack Spirou (***)" — match on
+          # the operator-name prefix, which is stable across re-issues.
+          echo "CSC_NAME=Developer ID Application: Jack Spirou" >> "$GITHUB_ENV"
 
-      # Hard preflight on the .p12 contents. electron-builder silently
-      # falls back to ad-hoc signing (`identityName=-`) when CSC_LINK
-      # cannot yield a Developer ID Application identity — wrong cert
-      # type in the bundle, missing private key, or wrong password.
-      # Apple notarytool then rejects the binary with "not signed with
-      # a valid Developer ID certificate" 5+ minutes later. Fail here
-      # with a precise diagnosis instead.
-      - name: Diagnose macOS .p12 contents
-        if: runner.os == 'macOS' && env.CSC_LINK != ''
+      # Verify the keychain we just built actually yields a codesigning-
+      # eligible Developer ID Application identity before we burn 8+
+      # minutes packaging + submitting to Apple. Fails fast with the
+      # full `find-identity` table if anything is off.
+      - name: Audit Developer ID identity
+        if: runner.os == 'macOS' && env.DESKTOP_BUILD_KEYCHAIN != ''
         shell: bash
         run: |
           set -euo pipefail
-          echo "::group::Subject + issuer + validity of every cert in CSC_LINK"
-          # -nokeys excludes private keys from output; we only inspect
-          # the public certificate chain. -clcerts limits to client
-          # (leaf) certs so the Apple intermediate doesn't drown the
-          # output. The password is read from CSC_KEY_PASSWORD via
-          # `pass:env:` to avoid putting it on the command line.
-          CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD" openssl pkcs12 \
-            -in "$CSC_LINK" \
-            -clcerts -nokeys \
-            -passin env:CSC_KEY_PASSWORD \
-            2>/dev/null \
-            | openssl x509 -noout -subject -issuer -dates \
-            || { echo "openssl could not read $CSC_LINK with the supplied password"; exit 1; }
+          echo "::group::security find-identity -v -p codesigning $DESKTOP_BUILD_KEYCHAIN"
+          security find-identity -v -p codesigning "$DESKTOP_BUILD_KEYCHAIN"
           echo "::endgroup::"
-          # Import to a scratch keychain so `security find-identity`
-          # can enumerate the codesigning-eligible identities exactly
-          # as electron-builder will see them.
-          kc="$RUNNER_TEMP/desktop-diagnose.keychain-db"
-          kc_pw="$(openssl rand -hex 16)"
-          security create-keychain -p "$kc_pw" "$kc"
-          security set-keychain-settings -lut 21600 "$kc"
-          security unlock-keychain -p "$kc_pw" "$kc"
-          security import "$CSC_LINK" -k "$kc" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_pw" "$kc" >/dev/null
-          echo "::group::security find-identity -v -p codesigning"
-          security find-identity -v -p codesigning "$kc"
-          echo "::endgroup::"
-          if ! security find-identity -v -p codesigning "$kc" | grep -q "Developer ID Application"; then
-            echo "::error::DESKTOP_APPLE_CERT_P12 does not contain a Developer ID Application identity."
-            echo "::error::Apple requires this exact certificate type for Developer ID signing + notarization."
-            echo "::error::Re-export from Keychain Access on a Mac that owns the Developer ID Application certificate,"
-            echo "::error::making sure to include the private key, and re-upload as DESKTOP_APPLE_CERT_P12 (base64)."
-            security delete-keychain "$kc" || true
+          if ! security find-identity -v -p codesigning "$DESKTOP_BUILD_KEYCHAIN" | grep -q "Developer ID Application"; then
+            echo "::error::No Developer ID Application identity available in the build keychain after import."
+            echo "::error::Re-check DESKTOP_APPLE_CERT_P12 and DESKTOP_APPLE_CERT_P12_PASSWORD secrets."
             exit 1
           fi
-          security delete-keychain "$kc"
 
       - name: Prepare Apple notarization
         if: runner.os == 'macOS'
@@ -192,17 +213,6 @@ jobs:
       # workflow trigger uploading to a live release.
       - name: Package + publish
         shell: bash
-        env:
-          # Surface electron-builder + @electron/osx-sign internals
-          # when DESKTOP_APPLE_CERT_P12 is present. The dryrun-3
-          # mac job proved CSC_LINK holds a valid Developer ID
-          # Application identity (see the "Diagnose macOS .p12
-          # contents" step) yet electron-builder still logs
-          # `falling back to ad-hoc signature` with no reason — we
-          # need the debug-level lines from `app-builder-lib` to
-          # find out what its internal `security import` /
-          # `find-identity` pipeline is rejecting.
-          DEBUG: "electron-builder,app-builder*,electron/osx-sign*,@electron/osx-sign*"
         run: |
           set -euo pipefail
           # The package:* scripts in package.json end with
@@ -260,7 +270,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${CSC_LINK:-}" ]; then
+          if [ -z "${DESKTOP_BUILD_KEYCHAIN:-}" ]; then
             echo "no signing credentials this run; skipping signature audit"
             exit 0
           fi
