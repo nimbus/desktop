@@ -32,5 +32,16 @@ export default defineConfig({
     include: ["src/**/*.spec.ts", "tests/**/*.spec.ts"],
     exclude: ["node_modules/**", "dist/**", "tests/e2e/**"],
     environment: "node",
+    // Multiple spec files import the `electron` package, which on
+    // first require triggers `node_modules/electron/install.js` to
+    // unpack the platform binary. Running specs in parallel forks
+    // races that extract step and surfaces as
+    // `EEXIST: file already exists, symlink ...
+    // Versions/Current/Electron Framework` on macOS CI. Pin a single
+    // file at a time so the extract happens at most once per run.
+    // Vitest 4 lifted `fileParallelism` to a top-level option (see
+    // its migration guide); the prior `poolOptions.forks.singleFork`
+    // shape was removed.
+    fileParallelism: false,
   },
 });

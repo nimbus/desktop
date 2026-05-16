@@ -81,6 +81,12 @@ nsis:
 linux:
   category: Development
   synopsis: "Native desktop shell for the Nimbus operator console."
+  # FpmTarget (used by both deb and rpm) requires a maintainer
+  # contact; without it electron-builder errors out asking for
+  # `author.email` in package.json. Pin it here to keep the JS
+  # package metadata clean and let DS9 release CI override it
+  # before publishing.
+  maintainer: "Nimbus <ops@nimbus.dev>"
   # AppImage is the primary self-contained format. deb + rpm cover
   # apt/dnf distribution channels per distribution-plan.md.
   target:

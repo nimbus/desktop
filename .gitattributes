@@ -1,0 +1,17 @@
+# Force LF line endings on checkout across platforms. Without this,
+# Windows runners get CRLF and Biome's lint reports every file as
+# malformed. Setting `text=auto eol=lf` makes git normalize on commit
+# and write LF on checkout regardless of the runner OS.
+* text=auto eol=lf
+
+# Binary build resources stay byte-exact.
+*.png binary
+*.ico binary
+*.icns binary
+*.p12 binary
+*.dmg binary
+*.zip binary
+*.exe binary
+*.AppImage binary
+*.deb binary
+*.rpm binary
