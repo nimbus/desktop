@@ -3,8 +3,19 @@ import path from "node:path";
 // TypeScript port of crates/nimbus-server/src/local_server/paths.rs in
 // nimbus/nimbus. Keep in sync — the discovery file path is the
 // contract that lets the shell find a running `nimbus start`.
+//
+// The functions below take a `LocalServerPlatform` argument so the
+// *target* platform's path conventions must govern — not the host's.
+// Use `path.posix` for linux/macos and `path.win32` for windows so
+// that running the linux resolver on a Windows host (or vice versa,
+// as happens in cross-platform CI test suites) still produces correct
+// POSIX or Windows-shaped paths.
 
 export type LocalServerPlatform = "linux" | "macos" | "windows";
+
+function pathFor(platform: LocalServerPlatform): path.PlatformPath {
+  return platform === "windows" ? path.win32 : path.posix;
+}
 
 export interface LocalServerPaths {
   readonly authTokenPath: string;
@@ -39,31 +50,33 @@ export function resolveLocalServerPathsForCurrentPlatform(): LocalServerPaths {
 function resolveLinuxPaths(
   env: Readonly<Record<string, string | undefined>>,
 ): LocalServerPaths {
+  const p = pathFor("linux");
   const home = requireEnv(env, "HOME", "linux");
-  const dataRoot = path.join(
-    envPath(env, "XDG_DATA_HOME") ?? path.join(home, ".local", "share"),
+  const dataRoot = p.join(
+    envPath(env, "XDG_DATA_HOME") ?? p.join(home, ".local", "share"),
     "nimbus",
   );
-  const stateRoot = path.join(
-    envPath(env, "XDG_STATE_HOME") ?? path.join(home, ".local", "state"),
+  const stateRoot = p.join(
+    envPath(env, "XDG_STATE_HOME") ?? p.join(home, ".local", "state"),
     "nimbus",
   );
   const runtimeRoot = envPath(env, "XDG_RUNTIME_DIR");
   const serverDiscoveryPath = runtimeRoot
-    ? path.join(runtimeRoot, "nimbus", "server.json")
-    : path.join(stateRoot, "run", "server.json");
+    ? p.join(runtimeRoot, "nimbus", "server.json")
+    : p.join(stateRoot, "run", "server.json");
   return {
-    authTokenPath: path.join(dataRoot, "auth", "token"),
+    authTokenPath: p.join(dataRoot, "auth", "token"),
     serverDiscoveryPath,
-    auditLogPath: path.join(stateRoot, "logs", "access.jsonl"),
+    auditLogPath: p.join(stateRoot, "logs", "access.jsonl"),
   };
 }
 
 function resolveMacosPaths(
   env: Readonly<Record<string, string | undefined>>,
 ): LocalServerPaths {
+  const p = pathFor("macos");
   const home = requireEnv(env, "HOME", "macos");
-  const applicationSupportRoot = path.join(
+  const applicationSupportRoot = p.join(
     home,
     "Library",
     "Application Support",
@@ -71,26 +84,27 @@ function resolveMacosPaths(
   );
   const tmpdir = envPath(env, "TMPDIR");
   const serverDiscoveryPath = tmpdir
-    ? path.join(tmpdir, "nimbus", "server.json")
-    : path.join(applicationSupportRoot, "run", "server.json");
+    ? p.join(tmpdir, "nimbus", "server.json")
+    : p.join(applicationSupportRoot, "run", "server.json");
   return {
-    authTokenPath: path.join(applicationSupportRoot, "auth", "token"),
+    authTokenPath: p.join(applicationSupportRoot, "auth", "token"),
     serverDiscoveryPath,
-    auditLogPath: path.join(home, "Library", "Logs", "nimbus", "access.jsonl"),
+    auditLogPath: p.join(home, "Library", "Logs", "nimbus", "access.jsonl"),
   };
 }
 
 function resolveWindowsPaths(
   env: Readonly<Record<string, string | undefined>>,
 ): LocalServerPaths {
+  const p = pathFor("windows");
   const localAppData =
     envPath(env, "LOCALAPPDATA") ??
-    path.join(userProfileDir(env) ?? "C:\\Users\\Default", "AppData", "Local");
-  const nimbusRoot = path.join(localAppData, "nimbus");
+    p.join(userProfileDir(env) ?? "C:\\Users\\Default", "AppData", "Local");
+  const nimbusRoot = p.join(localAppData, "nimbus");
   return {
-    authTokenPath: path.join(nimbusRoot, "auth", "token.json"),
-    serverDiscoveryPath: path.join(nimbusRoot, "run", "server.json"),
-    auditLogPath: path.join(nimbusRoot, "logs", "access.jsonl"),
+    authTokenPath: p.join(nimbusRoot, "auth", "token.json"),
+    serverDiscoveryPath: p.join(nimbusRoot, "run", "server.json"),
+    auditLogPath: p.join(nimbusRoot, "logs", "access.jsonl"),
   };
 }
 
@@ -110,7 +124,7 @@ function userProfileDir(
   const drive = env.HOMEDRIVE;
   const remainder = env.HOMEPATH;
   if (!drive || !remainder) return undefined;
-  return path.join(drive, remainder);
+  return path.win32.join(drive, remainder);
 }
 
 function requireEnv(

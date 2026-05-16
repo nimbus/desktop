@@ -64,10 +64,7 @@ describe("resolveLocalServerPaths — windows", () => {
       LOCALAPPDATA: "C:\\Users\\jack\\AppData\\Local",
     });
     expect(paths.serverDiscoveryPath).toBe(
-      "C:\\Users\\jack\\AppData\\Local/nimbus/run/server.json".replaceAll(
-        "/",
-        process.platform === "win32" ? "\\" : "/",
-      ),
+      "C:\\Users\\jack\\AppData\\Local\\nimbus\\run\\server.json",
     );
   });
 
@@ -75,14 +72,9 @@ describe("resolveLocalServerPaths — windows", () => {
     const paths = resolveLocalServerPaths("windows", {
       USERPROFILE: "C:\\Users\\jack",
     });
-    // The fallback path goes through path.join, which on non-Windows
-    // hosts uses POSIX separators. The contract is "AppData/Local
-    // under the user profile, then nimbus/..." — assert structurally.
-    expect(paths.authTokenPath).toContain("AppData");
-    expect(paths.authTokenPath).toContain("Local");
-    expect(paths.authTokenPath).toContain("nimbus");
-    expect(paths.authTokenPath).toContain("auth");
-    expect(paths.authTokenPath).toMatch(/token\.json$/);
+    expect(paths.authTokenPath).toBe(
+      "C:\\Users\\jack\\AppData\\Local\\nimbus\\auth\\token.json",
+    );
   });
 
   it("uses HOMEDRIVE + HOMEPATH when USERPROFILE is missing", () => {
@@ -90,7 +82,11 @@ describe("resolveLocalServerPaths — windows", () => {
       HOMEDRIVE: "C:",
       HOMEPATH: "\\Users\\jack",
     });
-    expect(paths.authTokenPath).toContain("nimbus");
-    expect(paths.serverDiscoveryPath).toMatch(/server\.json$/);
+    expect(paths.authTokenPath).toBe(
+      "C:\\Users\\jack\\AppData\\Local\\nimbus\\auth\\token.json",
+    );
+    expect(paths.serverDiscoveryPath).toBe(
+      "C:\\Users\\jack\\AppData\\Local\\nimbus\\run\\server.json",
+    );
   });
 });

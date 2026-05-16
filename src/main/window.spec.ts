@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => {
@@ -48,7 +50,12 @@ describe("buildWebPreferences", () => {
 describe("defaultPreloadPath", () => {
   it("resolves to a path under preload/index.cjs (CJS preload artifact)", () => {
     const p = defaultPreloadPath();
-    expect(p.endsWith("/preload/index.cjs")).toBe(true);
+    // path.join uses the host's separator (`\` on Windows, `/`
+    // elsewhere). The contract is "a path ending at
+    // <sep>preload<sep>index.cjs" — express it with path.sep so
+    // the assertion holds on every CI runner.
+    const suffix = `${path.sep}preload${path.sep}index.cjs`;
+    expect(p.endsWith(suffix)).toBe(true);
   });
 });
 
