@@ -11,20 +11,43 @@ credentials stay isolated from the core server.
 
 ## Install
 
-| Platform | Download                                         | Notes                                                   |
-| -------- | ------------------------------------------------ | ------------------------------------------------------- |
-| macOS    | `nimbus-desktop-<version>-universal.dmg`         | Universal binary (arm64 + x64), notarized.              |
-| Linux    | `nimbus-desktop-<version>-x86_64.AppImage`        | Self-contained. `chmod +x` and run.                      |
-|          | `nimbus-desktop_<version>_amd64.deb`              | Debian / Ubuntu: `sudo apt install ./*.deb`              |
-|          | `nimbus-desktop-<version>.x86_64.rpm`              | Fedora / RHEL: `sudo dnf install ./*.rpm`                 |
-| Windows  | _(deferred — Azure Trusted Signing onboarding pending; see [decision 002](./docs/decisions/002-windows-code-signing.md))_ |
+### Prerequisite: `nimbus` CLI
+
+The desktop shell connects to a `nimbus` server — it does **not** ship
+one. Install the CLI first:
+
+```bash
+# macOS / Linux (Homebrew)
+brew install nimbus/tap/nimbus
+```
+
+Other platforms and direct downloads:
+[`nimbus/nimbus` install reference](https://github.com/nimbus/nimbus#install).
+
+### Desktop shell
+
+**macOS — Homebrew Cask (recommended)**
+
+```bash
+brew install --cask nimbus/tap/nimbus-desktop
+```
+
+The cask installs `nimbus-desktop.app` into `/Applications` from a
+signed, notarized DMG, and `auto_updates true` defers upgrade
+management to the in-app updater (no `brew upgrade` needed).
+
+**Direct download (macOS / Linux)**
+
+| Platform | Download                                         | Notes                                                                                                                    |
+| -------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| macOS    | `nimbus-desktop-<version>-universal.dmg`         | Universal binary (arm64 + x64), notarized.                                                                               |
+| Linux    | `nimbus-desktop-<version>-x86_64.AppImage`       | Self-contained. `chmod +x` and run.                                                                                      |
+|          | `nimbus-desktop_<version>_amd64.deb`             | Debian / Ubuntu: `sudo apt install ./*.deb`                                                                              |
+|          | `nimbus-desktop-<version>.x86_64.rpm`            | Fedora / RHEL: `sudo dnf install ./*.rpm`                                                                                |
+| Windows  | `nimbus-desktop-Setup-<version>-x64.exe`         | _Unsigned — SmartScreen warning on first launch ([decision 002](./docs/decisions/002-windows-code-signing.md))._         |
 
 Latest releases live at
 [github.com/nimbus/desktop/releases](https://github.com/nimbus/desktop/releases).
-
-`nimbus-desktop` does **not** ship a Nimbus server. Install
-[`nimbus`](https://github.com/nimbus/nimbus) separately — the shell
-discovers a running instance on launch.
 
 ## Launch
 
