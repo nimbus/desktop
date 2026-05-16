@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "verify:secrets": "bash scripts/verify-secrets.sh",
     "verify:ds1": "npm run build:main && node scripts/ds1-browser-probe.mjs",
+    "verify:ds2": "npm run build:main && node scripts/ds2-browser-probe.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {
