@@ -1,0 +1,33 @@
+{
+  "name": "@nimbus/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Native desktop shell for the Nimbus operator console.",
+  "type": "module",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "lint": "biome check src tests scripts",
+    "format": "biome format --write src tests scripts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "verify:secrets": "bash scripts/verify-secrets.sh"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.15",
+    "@electron/notarize": "3.1.0",
+    "@playwright/test": "1.60.0",
+    "@types/node": "22.10.5",
+    "electron": "42.1.0",
+    "electron-builder": "26.8.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.6"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
