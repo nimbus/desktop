@@ -9,10 +9,14 @@
     "lint": "biome check src tests scripts",
     "format": "biome format --write src tests scripts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:main": "tsc -p tsconfig.build.json",
+    "dev": "npm run build:main && electron dist/main/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "verify:secrets": "bash scripts/verify-secrets.sh"
+    "verify:secrets": "bash scripts/verify-secrets.sh",
+    "verify:ds1": "npm run build:main && node scripts/ds1-browser-probe.mjs",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "electron-updater": "6.8.1"

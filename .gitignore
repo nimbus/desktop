@@ -17,6 +17,7 @@ build/
 test-results/
 playwright-report/
 coverage/
+.playwright-cli/
 
 # Editor / OS
 .DS_Store
