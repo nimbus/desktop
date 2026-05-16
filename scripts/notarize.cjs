@@ -31,6 +31,15 @@ const fs = require("node:fs");
 
 const { notarize } = require("@electron/notarize");
 
+// notarytool with an App Store Connect API key derives the team from the
+// key itself, so DESKTOP_APPLE_TEAM_ID is informational only here. We do
+// NOT pass `teamId` into @electron/notarize when also passing API-key
+// fields — its validator (validate-args.ts) classifies `teamId` as a
+// PASSWORD credential and rejects the call with
+//   "Cannot use password credentials, API key credentials and keychain
+//    credentials at once"
+// The team id stays in REQUIRED_ENV so the release workflow continues to
+// surface a meaningful error when the secret is missing.
 const REQUIRED_ENV = [
   "DESKTOP_APPLE_API_KEY_PATH",
   "DESKTOP_APPLE_API_KEY_ID",
@@ -96,7 +105,6 @@ module.exports = async function notarizing(context) {
     appleApiKey: keyPath,
     appleApiKeyId: process.env.DESKTOP_APPLE_API_KEY_ID,
     appleApiIssuer: process.env.DESKTOP_APPLE_API_ISSUER,
-    teamId: process.env.DESKTOP_APPLE_TEAM_ID,
   });
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   log(`notarization accepted in ${elapsed}s; ticket stapled to ${appPath}`);
