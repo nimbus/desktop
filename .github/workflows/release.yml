@@ -159,10 +159,11 @@ jobs:
           echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
           # Pin the cert by name so electron-builder picks ours even
           # if the runner's default keychain happens to contain
-          # another Developer ID identity. Subject from dryrun-3 was
-          # "Developer ID Application: Jack Spirou (***)" — match on
-          # the operator-name prefix, which is stable across re-issues.
-          echo "CSC_NAME=Developer ID Application: Jack Spirou" >> "$GITHUB_ENV"
+          # another Developer ID identity. electron-builder rejects
+          # CSC_NAME values that include the "Developer ID Application:"
+          # prefix — it inserts that prefix itself when querying the
+          # keychain. Use only the operator-name portion.
+          echo "CSC_NAME=Jack Spirou" >> "$GITHUB_ENV"
 
       # Verify the keychain we just built actually yields a codesigning-
       # eligible Developer ID Application identity before we burn 8+
