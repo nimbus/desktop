@@ -144,7 +144,16 @@ jobs:
             ls -la target/release | head -20
             exit 1
           fi
-          abs_path="$(cd "$(dirname "$bin_path")" && pwd)/$(basename "$bin_path")"
+          # On Windows runners the default bash is Git Bash, where `pwd`
+          # emits POSIX-style paths like /d/a/... that Node.js on Windows
+          # cannot resolve. `pwd -W` returns the mixed-form D:/a/... that
+          # Node accepts. On Linux/macOS plain `pwd` is correct.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            abs_dir="$(cd "$(dirname "$bin_path")" && pwd -W)"
+          else
+            abs_dir="$(cd "$(dirname "$bin_path")" && pwd)"
+          fi
+          abs_path="$abs_dir/$(basename "$bin_path")"
           echo "NIMBUS_DESKTOP_NIMBUS_BIN=$abs_path" >> "$GITHUB_ENV"
           echo "built nimbus binary: $abs_path"
           "$abs_path" --version || true
