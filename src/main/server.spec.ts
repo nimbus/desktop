@@ -9,6 +9,7 @@ import {
   buildUiUrl,
   NimbusBinaryNotFoundError,
   normalizeLoopbackAddress,
+  resolveNimbusExecutable,
   resolveServer,
   ServerNotRunningError,
   ServerReadinessTimeoutError,
@@ -182,6 +183,41 @@ describe("resolveServer", () => {
         },
         env: { HOME: "/nonexistent-home", PATH: "/this/path/has/no/nimbus" },
         pidChecker: () => false,
+      }),
+    ).rejects.toBeInstanceOf(NimbusBinaryNotFoundError);
+  });
+});
+
+describe("resolveNimbusExecutable — NIMBUS_DESKTOP_NIMBUS_BIN override", () => {
+  it("returns the override path when it is executable", async () => {
+    // process.execPath (the running node binary) is guaranteed to be
+    // executable and to exist on every CI runner — a stable fixture
+    // for proving the override is consulted before PATH.
+    const resolved = await resolveNimbusExecutable({
+      NIMBUS_DESKTOP_NIMBUS_BIN: process.execPath,
+      PATH: "/nonexistent",
+    });
+    expect(resolved).toBe(process.execPath);
+  });
+
+  it("throws NimbusBinaryNotFoundError when the override is not executable", async () => {
+    await expect(
+      resolveNimbusExecutable({
+        NIMBUS_DESKTOP_NIMBUS_BIN: "/definitely/not/a/binary/here",
+        PATH: process.env.PATH,
+      }),
+    ).rejects.toBeInstanceOf(NimbusBinaryNotFoundError);
+  });
+
+  it("ignores an empty override and falls through to PATH", async () => {
+    // Empty string should not short-circuit. A real production env can
+    // expose `NIMBUS_DESKTOP_NIMBUS_BIN=""` from a misconfigured shell
+    // profile; treating that as a hard override would brick the shell.
+    await expect(
+      resolveNimbusExecutable({
+        NIMBUS_DESKTOP_NIMBUS_BIN: "",
+        PATH: "/this/path/has/no/nimbus",
+        HOME: "/nonexistent-home",
       }),
     ).rejects.toBeInstanceOf(NimbusBinaryNotFoundError);
   });

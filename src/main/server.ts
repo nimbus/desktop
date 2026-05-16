@@ -58,6 +58,11 @@ export interface ResolveServerOptions {
   readonly readinessTimeoutMs?: number;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
+  // Called synchronously the moment nimbus has been spawned, before
+  // we begin polling for readiness. The caller can use this to wire
+  // shutdown cleanup against the handle so a quit signal arriving
+  // mid-readiness-wait still reaps the child.
+  readonly onSpawn?: (handle: SpawnedServerHandle) => void;
 }
 
 export class ServerNotRunningError extends Error {
@@ -137,6 +142,7 @@ export async function resolveServer(
   const executable =
     options.nimbusExecutable ?? (await resolveNimbusExecutable(env));
   const handle = spawnDetached(executable);
+  options.onSpawn?.(handle);
 
   const deadline = now() + readinessTimeoutMs;
   while (now() < deadline) {
@@ -194,6 +200,22 @@ function spawnDetached(executable: string): SpawnedServerHandle {
 export async function resolveNimbusExecutable(
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<string> {
+  // DS7 test seam. When `NIMBUS_DESKTOP_NIMBUS_BIN` is set, the shell
+  // uses it verbatim instead of consulting PATH and the per-platform
+  // fallbacks. Lets E2E point at a specific downloaded binary without
+  // PATH manipulation that risks shadowing other tools on the runner.
+  // The override is intentionally treated as a hard contract: if it
+  // points at something unexecutable, fail loudly rather than silently
+  // walking the fallbacks (which would defeat the whole point of the
+  // override during a debug session).
+  const override = env.NIMBUS_DESKTOP_NIMBUS_BIN;
+  if (override && override.length > 0) {
+    if (await canExecute(override)) return override;
+    throw new NimbusBinaryNotFoundError([
+      `NIMBUS_DESKTOP_NIMBUS_BIN=${override} (not executable)`,
+    ]);
+  }
+
   const fromPath = await findOnPath("nimbus", env);
   if (fromPath) return fromPath;
 

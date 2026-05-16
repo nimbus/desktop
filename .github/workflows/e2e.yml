@@ -1,0 +1,140 @@
+name: e2e
+
+# DS7 packaged-shell E2E gate. Builds production installers per
+# platform, downloads a matching `nimbus` binary from the latest
+# nimbus/nimbus release, points the shell at it via
+# NIMBUS_DESKTOP_NIMBUS_BIN, then runs the Playwright specs against
+# the packaged Electron binary.
+#
+# The specs exercise the full DS2/DS3/DS7 surface:
+#   - critical-path.spec.ts: shell connects to a pre-running nimbus,
+#     reaches /ui/, security restrictions hold (DS3 fuses).
+#   - lifecycle.spec.ts: shell spawns nimbus when none is running,
+#     reaps it on shutdown, and relaunches against the same scratch
+#     state without orphaning the previous server.
+#
+# The shell binary itself is the canonical production output — we run
+# the same `electron-builder --publish=never` pipeline package.yml
+# uses, then point the harness at the unpacked binary inside `release/`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: package:mac
+            nimbus_asset: nimbus_darwin_arm64.tar.gz
+            nimbus_archive_kind: tar
+            nimbus_bin_subpath: nimbus
+            name: mac-arm64
+            e2e_runner_prefix: ""
+          - os: ubuntu-24.04
+            target: package:linux
+            nimbus_asset: nimbus_linux_x86_64.tar.gz
+            nimbus_archive_kind: tar
+            nimbus_bin_subpath: nimbus
+            name: linux-x64
+            # GitHub Actions Linux runners have no display; the packaged
+            # Electron shell still creates a BrowserWindow on startup,
+            # so the e2e step runs under xvfb. macOS/Windows runners
+            # have real GUIs and need no prefix.
+            e2e_runner_prefix: "xvfb-run -a"
+          - os: windows-2022
+            target: package:win
+            nimbus_asset: nimbus_windows_x86_64.zip
+            nimbus_archive_kind: zip
+            nimbus_bin_subpath: nimbus.exe
+            name: win-x64
+            e2e_runner_prefix: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+
+      - name: Download nimbus binary from latest nimbus/nimbus release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo nimbus/nimbus --json tagName --jq .tagName)
+          echo "nimbus tag: $tag"
+          mkdir -p .nimbus-bin
+          gh release download "$tag" \
+            --repo nimbus/nimbus \
+            --pattern '${{ matrix.nimbus_asset }}' \
+            --dir .nimbus-bin
+          case "${{ matrix.nimbus_archive_kind }}" in
+            tar)
+              tar -xzf ".nimbus-bin/${{ matrix.nimbus_asset }}" -C .nimbus-bin
+              ;;
+            zip)
+              unzip -o ".nimbus-bin/${{ matrix.nimbus_asset }}" -d .nimbus-bin
+              ;;
+          esac
+          bin_path=".nimbus-bin/${{ matrix.nimbus_bin_subpath }}"
+          if [ ! -f "$bin_path" ]; then
+            echo "Expected nimbus binary at $bin_path after extraction:"
+            ls -la .nimbus-bin
+            exit 1
+          fi
+          chmod +x "$bin_path" || true
+          # Resolve to an absolute path so the spawn-detached child
+          # inherits a path that survives the shell's scratch cwd.
+          abs_path="$(cd "$(dirname "$bin_path")" && pwd)/$(basename "$bin_path")"
+          echo "NIMBUS_DESKTOP_NIMBUS_BIN=$abs_path" >> "$GITHUB_ENV"
+          echo "resolved nimbus binary: $abs_path"
+          "$abs_path" --version || true
+
+      - name: Install Linux GUI deps for packaged Electron
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # xvfb provides a virtual framebuffer for the headless runner.
+          # libnss3 / libatk-bridge2.0-0 / libgtk-3-0 / libgbm1 are the
+          # baseline Chromium runtime libs not always present on the
+          # base ubuntu-24.04 image; libasound2t64 satisfies Electron's
+          # audio runtime probe.
+          sudo apt-get install -y --no-install-recommends \
+            xvfb \
+            libnss3 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libgbm1 \
+            libasound2t64
+
+      - name: Package the shell
+        run: npm run ${{ matrix.target }}
+
+      - name: Run packaged-shell E2E
+        run: ${{ matrix.e2e_runner_prefix }} npm run test:e2e
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces-${{ matrix.name }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

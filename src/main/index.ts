@@ -17,6 +17,7 @@ import {
   type ServerEnvelope,
   ServerNotRunningError,
   ServerReadinessTimeoutError,
+  type SpawnedServerHandle,
 } from "./server.js";
 import {
   createTrayController,
@@ -34,18 +35,73 @@ import { loadWindowState, saveWindowState } from "./window-state.js";
 
 const ALLOWED_ORIGIN_FALLBACK = "http://127.0.0.1/";
 const SHUTDOWN_GRACE_MS = 5_000;
+const QUIT_WAIT_FOR_SPAWN_MS = 3_000;
 
 export async function main(): Promise<void> {
+  // The harness's SIGTERM (mapped by Electron to before-quit) can land
+  // mid-readiness-wait — AFTER we've spawned nimbus but BEFORE
+  // resolveServer has returned. Register a single before-quit handler
+  // up front, against module-scoped state that the resolveServer
+  // onSpawn callback populates the moment the child exists, so the
+  // first quit (whenever it arrives) reaps the child cleanly. Without
+  // this seam, a SIGTERM mid-setup leaves the spawned nimbus as an
+  // orphan because the late-registered handler never sees it.
+  let nimbusHandle: SpawnedServerHandle | null = null;
+  let nimbusUrl: string | null = null;
+  let shuttingDown = false;
+  let resolveSpawned: ((handle: SpawnedServerHandle) => void) | null = null;
+  const spawnedPromise = new Promise<SpawnedServerHandle>((resolve) => {
+    resolveSpawned = resolve;
+  });
+
+  app.on("before-quit", (event) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    event.preventDefault();
+    void (async () => {
+      const handle =
+        nimbusHandle ??
+        (await Promise.race([
+          spawnedPromise,
+          new Promise<null>((r) =>
+            setTimeout(() => r(null), QUIT_WAIT_FOR_SPAWN_MS),
+          ),
+        ]));
+      const url = nimbusUrl;
+      if (handle && url) {
+        try {
+          await shutdownSpawnedServer(url, handle.pid, handle.child);
+        } catch {
+          // best-effort; we are exiting anyway
+        }
+      } else if (handle) {
+        // No URL yet (SIGTERM arrived before resolveServer returned).
+        // Signal the spawned nimbus directly so it doesn't outlive us.
+        try {
+          handle.child.kill("SIGTERM");
+        } catch {}
+      }
+      app.exit(0);
+    })();
+  });
+
   await app.whenReady();
 
   let envelope: ServerEnvelope;
   try {
-    envelope = await resolveServer({ ensure: true });
+    envelope = await resolveServer({
+      ensure: true,
+      onSpawn: (handle) => {
+        nimbusHandle = handle;
+        resolveSpawned?.(handle);
+      },
+    });
   } catch (error) {
     presentFatalError(error);
     app.quit();
     return;
   }
+  nimbusUrl = envelope.url;
 
   const allowedOrigin = originOf(envelope.url, ALLOWED_ORIGIN_FALLBACK);
   installSecurityRestrictions(app, { allowedOrigin });
@@ -93,19 +149,7 @@ export async function main(): Promise<void> {
 
   registerTrayIpc(allowedOrigin, tray);
 
-  const updater = await initializeUpdater(win, allowedOrigin);
-
-  if (envelope.spawned) {
-    const handle = envelope.spawned;
-    const serverUrl = envelope.url;
-    app.on("before-quit", (event) => {
-      event.preventDefault();
-      updater?.destroy();
-      void shutdownSpawnedServer(serverUrl, handle.pid, handle.child).finally(
-        () => app.exit(0),
-      );
-    });
-  }
+  await initializeUpdater(win, allowedOrigin);
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
@@ -308,20 +352,17 @@ async function shutdownSpawnedServer(
       clearTimeout(timer);
     }
   } catch {
-    // Fall through to SIGTERM. The server may already be down, or
-    // the shutdown endpoint may be unreachable.
+    // server may already be gone or unresponsive; fall through to signal path
   }
   try {
     child.kill("SIGTERM");
-  } catch {
-    // best-effort: pid may already be gone
-  }
+  } catch {}
   await sleep(250);
   try {
     process.kill(pid, 0);
     child.kill("SIGKILL");
   } catch {
-    // process is gone — exactly what we wanted
+    // pid is already gone — what we wanted
   }
 }
 

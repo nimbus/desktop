@@ -112,7 +112,9 @@ describe("main — happy path against a discovered server", () => {
     await main();
 
     expect(electron.app.whenReady).toHaveBeenCalledOnce();
-    expect(resolveServerMock).toHaveBeenCalledWith({ ensure: true });
+    expect(resolveServerMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ensure: true }),
+    );
     expect(electron.BrowserWindow).toHaveBeenCalledOnce();
     const instance = electron.BrowserWindow.mock.results[0]?.value as {
       loadURL: ReturnType<typeof vi.fn>;
@@ -204,7 +206,11 @@ describe("main — happy path against a discovered server", () => {
 });
 
 describe("main — spawned-server lifecycle", () => {
-  it("registers before-quit only when the shell spawned the server", async () => {
+  // DS7: the before-quit handler is registered unconditionally, before
+  // resolveServer runs, so a quit signal arriving mid-readiness-wait
+  // still reaps the spawned nimbus. The handler itself is a no-op when
+  // resolveServer eventually returned a discovered (not spawned) server.
+  it("registers before-quit when the shell spawned the server", async () => {
     const electron = (await import("electron")) as unknown as {
       app: { on: ReturnType<typeof vi.fn> };
     };
@@ -231,7 +237,7 @@ describe("main — spawned-server lifecycle", () => {
     expect(subscribed).toContain("before-quit");
   });
 
-  it("does NOT register before-quit when the shell only discovered a server", async () => {
+  it("registers before-quit even when the shell only discovered a server", async () => {
     const electron = (await import("electron")) as unknown as {
       app: { on: ReturnType<typeof vi.fn> };
     };
@@ -252,7 +258,10 @@ describe("main — spawned-server lifecycle", () => {
     const subscribed = electron.app.on.mock.calls.map(
       (c: unknown[]) => c[0] as string,
     );
-    expect(subscribed).not.toContain("before-quit");
+    // The single always-on handler is the same one that protects the
+    // spawn-mid-quit race; in the discovered-only case it simply exits
+    // without reaping anything.
+    expect(subscribed).toContain("before-quit");
   });
 });
 
