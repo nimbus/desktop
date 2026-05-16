@@ -1,6 +1,6 @@
 {
   "name": "@nimbus/desktop",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Native desktop shell for the Nimbus operator console.",
   "type": "module",
