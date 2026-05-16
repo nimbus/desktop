@@ -380,22 +380,25 @@ jobs:
           DMG="/tmp/dmg/nimbus-desktop-${VERSION}-universal.dmg"
           SHA_DMG=$(shasum -a 256 "$DMG" | awk '{print $1}')
 
+          # Stanza order + depends_on syntax follow the layout
+          # enforced by `brew style`. Keep it in sync if Homebrew's
+          # Cask/StanzaOrder cops shift.
           cat > /tmp/nimbus-desktop.rb << CASKEOF
           cask "nimbus-desktop" do
+            version "${VERSION}"
+            sha256 "${SHA_DMG}"
+
+            url "https://github.com/nimbus/desktop/releases/download/v#{version}/nimbus-desktop-#{version}-universal.dmg"
             name "Nimbus Desktop"
             desc "Native desktop shell for the Nimbus operator console"
             homepage "https://github.com/nimbus/desktop"
-            version "${VERSION}"
 
             livecheck do
               skip "Auto-generated on release."
             end
 
             auto_updates true
-            depends_on macos: ">= :sonoma"
-
-            url "https://github.com/nimbus/desktop/releases/download/v#{version}/nimbus-desktop-#{version}-universal.dmg"
-            sha256 "${SHA_DMG}"
+            depends_on macos: :sonoma
 
             app "nimbus-desktop.app"
 
