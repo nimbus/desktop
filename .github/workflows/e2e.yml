@@ -125,6 +125,13 @@ jobs:
           set -euo pipefail
           cargo --version
           rustc --version
+          # nimbus-server's build.rs guards release builds with a
+          # presence check on packages/nimbus-ui/dist/index.html so
+          # `nimbus ui --ensure` always has a renderer to serve. Build
+          # the UI first so the cargo step finds it. Mirrors the
+          # local `make release` target.
+          npm ci
+          npm run build -w packages/nimbus-ui
           # nimbus-bin is the binary crate; build it in release mode to
           # match the dev-loop convention the helper looks for.
           cargo build --release -p nimbus-bin
