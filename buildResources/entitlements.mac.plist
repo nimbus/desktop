@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    DS6 macOS entitlements for the hardened runtime + Developer ID
+    signing path used by DS8 notarization.
+
+    allow-jit is required because V8 JIT-compiles JavaScript at
+    runtime; without it the renderer crashes on first script execution
+    under the hardened runtime.
+
+    allow-unsigned-executable-memory is required by Electron's V8
+    integration on macOS (electron-builder docs explicitly call this
+    out as required for Electron apps under the hardened runtime).
+
+    network.client is required because the renderer fetches
+    http://127.0.0.1:<port>/ui/ from the local nimbus server and
+    nimbusShell.updater connects to GitHub Releases for update
+    detection. No server entitlement: the shell does not listen on a
+    socket itself; the nimbus binary it spawns binds 127.0.0.1.
+
+    No file-access entitlements — the shell reads only its own
+    userData (Electron-managed) and the server.json discovery file
+    under TMPDIR/Application Support, both already accessible without
+    additional entitlements under the hardened runtime.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+</dict>
+</plist>

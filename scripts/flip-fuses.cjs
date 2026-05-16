@@ -46,6 +46,25 @@ function resolveBinaryPath(context) {
 }
 
 async function flipAppFuses(context) {
+  // During a `mac.target: universal` build, electron-builder packs
+  // each arch into an `appOutDir` ending in `-x64-temp` / `-arm64-temp`
+  // and merges them into the final universal output via
+  // @electron/universal, which rejects per-arch builds whose
+  // CodeResources SHAs differ. Ad-hoc resigning each temp build
+  // (which flipFuses does on darwin with `resetAdHocDarwinSignature`)
+  // produces exactly that drift. Skip the temp builds and flip on
+  // the merged universal binary instead — the temps are discarded
+  // after merge, so flipping them is wasted work either way.
+  if (
+    /-(x64|arm64)-temp(\/|$)/.test(context.appOutDir) ||
+    /-(x64|arm64)-temp$/.test(context.appOutDir)
+  ) {
+    process.stdout.write(
+      `[flip-fuses] skipping per-arch temp build ${context.appOutDir} — universal merge will receive the flip\n`,
+    );
+    return;
+  }
+
   const binary = resolveBinaryPath(context);
   const enableInspect = process.env[INSPECTOR_OPT_IN_ENV] === "1";
 

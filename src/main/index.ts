@@ -212,10 +212,17 @@ async function resolveAutoUpdater(): Promise<ElectronUpdaterLike | null> {
     return null;
   }
   try {
+    // electron-updater ships CJS. Under Node ESM interop the named
+    // re-export sometimes lands on `mod.autoUpdater` and sometimes
+    // under `mod.default.autoUpdater` (the latter is what we see
+    // when loaded out of an asar in a packaged build). Accept both
+    // shapes; treat an unresolved `autoUpdater` as a hard skip so
+    // the renderer never sees a partially-initialized updater.
     const mod = (await import("electron-updater")) as unknown as {
-      autoUpdater: ElectronUpdaterLike;
+      autoUpdater?: ElectronUpdaterLike;
+      default?: { autoUpdater?: ElectronUpdaterLike };
     };
-    return mod.autoUpdater;
+    return mod.autoUpdater ?? mod.default?.autoUpdater ?? null;
   } catch {
     return null;
   }

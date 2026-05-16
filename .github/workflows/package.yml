@@ -1,0 +1,83 @@
+name: package
+
+# DS6 packaging gate. Builds production installers for all three
+# target platforms on their canonical runner. Signing happens when
+# DS9-managed secrets are available; without them electron-builder
+# emits unsigned (or ad-hoc signed) artifacts — sufficient to prove
+# the packaging config completes end-to-end. The DS6 audit gate is:
+#   1. each runner emits at least one installer
+#   2. installers stay under the per-platform size budget
+#   3. fuses on the packed binary match the production posture
+#
+# This workflow is package-only — it does not publish anywhere.
+# DS9 lands `release.yml` that triggers on `v*` tags and publishes
+# to GitHub Releases with notarization (macOS) and signing (Windows).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: package:mac
+            name: mac-universal
+          - os: ubuntu-24.04
+            target: package:linux
+            name: linux-x64
+          - os: windows-2022
+            target: package:win
+            name: win-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      # Skip code signing in the package-only workflow. DS9 release CI
+      # provides the signing credentials at release time.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run ${{ matrix.target }}
+      - name: Audit installer sizes
+        run: node scripts/check-installer-sizes.cjs release
+      - name: Inventory release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::release/ contents"
+          ls -la release/ || true
+          echo "::endgroup::"
+          echo "::group::installers"
+          find release -maxdepth 1 -type f \
+            \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" \
+               -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \)
+          echo "::endgroup::"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nimbus-desktop-${{ matrix.name }}
+          # latest-*.yml are the auto-update channel manifests; bundle
+          # them so DS9 can verify the channel feed wiring on the
+          # same artifact set.
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/latest-*.yml
+          if-no-files-found: error
+          retention-days: 14

@@ -1,10 +1,21 @@
-# DS3 baseline electron-builder config. DS6 will expand this with
-# DMG / NSIS / Flatpak packaging targets; DS3 only needs the
-# afterPack hook so `electron-builder --dir` produces an unpacked
-# build whose fuses are flipped to the production posture and can be
-# audited by scripts/prepublish-check.cjs.
+# DS6 packaging config. Produces production-quality installers:
+#   macOS: universal DMG + ZIP (arm64 + x64 merged via universal target)
+#   Windows: NSIS x64 + arm64
+#   Linux: AppImage + deb + rpm (x64)
+#
+# Signing is configured here but credentials are loaded by DS8/DS9 CI
+# from the DS0B-uploaded secret names. `signAndEditExecutable` and
+# `notarize` are intentionally NOT set in this file — they are
+# resolved per-platform from env at sign time so dry-run builds (no
+# secrets) succeed locally and on the package-only matrix workflow.
 appId: dev.nimbus.desktop
 productName: nimbus-desktop
+# executableName drives the on-disk binary name on Linux. Without it
+# electron-builder falls back to a sanitized package.json `name`,
+# which for the scoped @nimbus/desktop strips `/` but keeps `@` and
+# produces `@nimbusdesktop`. Pinning explicitly keeps the binary name
+# consistent across platforms and aligned with productName.
+executableName: nimbus-desktop
 copyright: Copyright © 2026 Nimbus
 asar: true
 afterPack: scripts/flip-fuses.cjs
@@ -19,16 +30,70 @@ files:
   - "!**/*.map"
 extraMetadata:
   main: dist/main/index.js
+
+# ── macOS ──────────────────────────────────────────────────────────
 mac:
   category: public.app-category.developer-tools
+  # Hardened runtime is mandatory for Developer ID notarization. The
+  # entitlements file allows V8 JIT + unsigned executable memory (both
+  # required by Electron under the hardened runtime) + outbound
+  # network access (renderer → 127.0.0.1 nimbus server + updater →
+  # GitHub Releases).
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: buildResources/entitlements.mac.plist
+  entitlementsInherit: buildResources/entitlements.mac.plist
+  # DS9 release CI sets CSC_LINK + CSC_KEY_PASSWORD (or
+  # CSC_IDENTITY_AUTO_DISCOVERY=true with a keychain that contains
+  # the DS0B Developer ID Application identity). When neither is
+  # present (dry-run / package-only matrix run) electron-builder
+  # skips signing without failing — the resulting DMG is unsigned
+  # but otherwise complete, which is sufficient for the DS6 gate.
   target:
-    - target: dir
-      arch: arm64
-linux:
-  target:
-    - target: dir
-      arch: x64
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
+dmg:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  writeUpdateInfo: true
+
+# ── Windows ────────────────────────────────────────────────────────
 win:
+  # No `signtool` invocation here — DS8 lands `scripts/sign-windows.cjs`
+  # and wires `signtoolOptions.sign` after Azure Trusted Signing
+  # onboarding completes (002-windows-code-signing.md).
   target:
-    - target: dir
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+nsis:
+  # Per-user install default (NIMBUS_PER_MACHINE=0). System-wide
+  # install is reachable via `/ALLUSERS=1` on the installer command
+  # line, matching Slack/Discord/VS Code conventions.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
+
+# ── Linux ──────────────────────────────────────────────────────────
+linux:
+  category: Development
+  synopsis: "Native desktop shell for the Nimbus operator console."
+  # AppImage is the primary self-contained format. deb + rpm cover
+  # apt/dnf distribution channels per distribution-plan.md.
+  target:
+    - target: AppImage
       arch: x64
+    - target: deb
+      arch: x64
+    - target: rpm
+      arch: x64
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+appImage:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+deb:
+  artifactName: "${productName}_${version}_${arch}.${ext}"
+rpm:
+  artifactName: "${productName}-${version}.${arch}.${ext}"
