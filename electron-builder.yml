@@ -1,0 +1,33 @@
+# DS3 baseline electron-builder config. DS6 will expand this with
+# DMG / NSIS / Flatpak packaging targets; DS3 only needs the
+# afterPack hook so `electron-builder --dir` produces an unpacked
+# build whose fuses are flipped to the production posture and can be
+# audited by scripts/prepublish-check.cjs.
+appId: dev.nimbus.desktop
+productName: nimbus-desktop
+copyright: Copyright © 2026 Nimbus
+asar: true
+afterPack: scripts/flip-fuses.cjs
+directories:
+  output: release
+  buildResources: build
+files:
+  - "dist/**/*"
+  - "package.json"
+  - "!**/*.spec.{ts,js}"
+  - "!**/*.map"
+extraMetadata:
+  main: dist/main/index.js
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dir
+      arch: arm64
+linux:
+  target:
+    - target: dir
+      arch: x64
+win:
+  target:
+    - target: dir
+      arch: x64
