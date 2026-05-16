@@ -19,6 +19,10 @@ executableName: nimbus-desktop
 copyright: Copyright © 2026 Nimbus
 asar: true
 afterPack: scripts/flip-fuses.cjs
+# DS8: macOS-only notarization hook. No-op on win/linux and when Apple
+# API credentials are absent (dry-run / package-only matrix). Activated
+# in DS9 release CI once secrets are present in the runner env.
+afterSign: scripts/notarize.cjs
 directories:
   output: release
   buildResources: build
@@ -60,9 +64,15 @@ dmg:
 
 # ── Windows ────────────────────────────────────────────────────────
 win:
-  # No `signtool` invocation here — DS8 lands `scripts/sign-windows.cjs`
-  # and wires `signtoolOptions.sign` after Azure Trusted Signing
-  # onboarding completes (002-windows-code-signing.md).
+  # DS8: routes per-artifact signing through scripts/sign-windows.cjs,
+  # which is a no-op until decision 002 flips from "accepted (DS0A);
+  # activation deferred" to "accepted — active" (Trusted Signing
+  # onboarding complete). While deferred, electron-builder still calls
+  # the hook for every signable artifact but the hook returns without
+  # invoking signtool — the resulting NSIS installer is unsigned but
+  # complete, matching the decision-002 deferral contract.
+  signtoolOptions:
+    sign: scripts/sign-windows.cjs
   target:
     - target: nsis
       arch:
