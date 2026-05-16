@@ -51,6 +51,7 @@ vi.mock("electron", () => {
           session: { setPermissionRequestHandler: vi.fn() },
           on: vi.fn(),
           setWindowOpenHandler: vi.fn(),
+          send: vi.fn(),
         },
         once: vi.fn(),
         on: vi.fn(),

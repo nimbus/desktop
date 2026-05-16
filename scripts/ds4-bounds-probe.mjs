@@ -101,7 +101,7 @@ async function firstLaunch() {
     record("url_under_ui", probe.href.includes("/ui/"));
     record("sandbox_no_process", probe.processType === "undefined");
     record("bridge_exists", probe.shellExists === true);
-    record("bridge_version_ds4", probe.shellVersion === "ds4");
+    record("bridge_version_ds5", probe.shellVersion === "ds5");
     record("bridge_frozen", probe.shellFrozen === true);
     record("tray_namespace", probe.trayNamespace === "object");
     record(

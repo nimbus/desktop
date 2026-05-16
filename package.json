@@ -21,6 +21,7 @@
     "verify:fuses": "node scripts/prepublish-check.cjs",
     "verify:ds3": "npm run package && node scripts/ds3-verify-fuses.mjs && node scripts/ds3-browser-probe.mjs",
     "verify:ds4": "npm run build:main && node scripts/ds4-bounds-probe.mjs",
+    "verify:ds5": "npm run build:main && node scripts/ds5-updater-probe.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {

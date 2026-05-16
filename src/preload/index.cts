@@ -8,19 +8,39 @@
 // (`nimbusShell`) from the wire-up (`installNimbusShell`) so the spec
 // can exercise the wire-up with a fake bridge instead of trying to
 // intercept a CJS `require`. The side-effect autorun below covers the
-// actual Electron runtime, and `scripts/ds4-bounds-probe.mjs` proves it
-// end-to-end.
+// actual Electron runtime, and the DS5 mocked-feed probe proves the
+// updater bridge end-to-end.
 
 import type { ContextBridge, IpcRenderer } from "electron";
-import type { NimbusShell, TrayStatusDot } from "../shared/ipc-types";
+import type {
+  NimbusShell,
+  TrayStatusDot,
+  UpdaterStateChange,
+  UpdaterStateListener,
+} from "../shared/ipc-types";
 
 const TRAY_CHANNEL = "nimbus:tray:setStatusDot";
+const UPDATER_STATE_CHANGED_CHANNEL = "nimbus:updater:state-changed";
+const UPDATER_CHECK_FOR_UPDATES_CHANNEL = "nimbus:updater:checkForUpdates";
 
 function buildShell(ipc: IpcRenderer): NimbusShell {
   return Object.freeze({
-    __version: "ds4",
+    __version: "ds5",
     tray: Object.freeze({
       setStatusDot: (state: TrayStatusDot) => ipc.invoke(TRAY_CHANNEL, state),
+    }),
+    updater: Object.freeze({
+      onStateChange: (listener: UpdaterStateListener) => {
+        const wrapped = (_event: unknown, change: UpdaterStateChange) => {
+          listener(change);
+        };
+        ipc.on(UPDATER_STATE_CHANGED_CHANNEL, wrapped);
+        return () => {
+          ipc.removeListener(UPDATER_STATE_CHANGED_CHANNEL, wrapped);
+        };
+      },
+      checkForUpdates: () =>
+        ipc.invoke(UPDATER_CHECK_FOR_UPDATES_CHANNEL) as Promise<void>,
     }),
   });
 }

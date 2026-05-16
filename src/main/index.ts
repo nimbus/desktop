@@ -2,7 +2,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { app, type BrowserWindow, dialog, ipcMain, Menu } from "electron";
-import { TRAY_SET_STATUS_DOT_CHANNEL } from "../shared/ipc-types.js";
+import {
+  TRAY_SET_STATUS_DOT_CHANNEL,
+  UPDATER_CHECK_FOR_UPDATES_CHANNEL,
+  UPDATER_STATE_CHANGED_CHANNEL,
+  type UpdaterStateChange,
+} from "../shared/ipc-types.js";
 import { createIpcRouter, type IpcRouter } from "./ipc.js";
 import { buildAppMenu, type MenuPlatform } from "./menu.js";
 import { installSecurityRestrictions } from "./security.js";
@@ -19,6 +24,11 @@ import {
   type TrayController,
   type TrayStatus,
 } from "./tray.js";
+import {
+  createUpdaterController,
+  type ElectronUpdaterLike,
+  type UpdaterController,
+} from "./updater.js";
 import { createMainWindow, defaultPreloadPath } from "./window.js";
 import { loadWindowState, saveWindowState } from "./window-state.js";
 
@@ -83,11 +93,14 @@ export async function main(): Promise<void> {
 
   registerTrayIpc(allowedOrigin, tray);
 
+  const updater = await initializeUpdater(win, allowedOrigin);
+
   if (envelope.spawned) {
     const handle = envelope.spawned;
     const serverUrl = envelope.url;
     app.on("before-quit", (event) => {
       event.preventDefault();
+      updater?.destroy();
       void shutdownSpawnedServer(serverUrl, handle.pid, handle.child).finally(
         () => app.exit(0),
       );
@@ -113,11 +126,8 @@ function openConsole(win: ReturnType<typeof createMainWindow>): void {
 }
 
 function onStartServer(): Promise<void> {
-  // DS5 grows this into a real restart-loop with envelope tracking.
-  // For DS4, Start is a no-op when the shell already has a live server
-  // envelope; the tray menu still shows the action so the seam is
-  // present, but a status-text refresh would conflict with the renderer
-  // pushing tray:setStatusDot.
+  // DS5+ may grow this to a real restart-loop; the tray menu still
+  // surfaces the action so the seam is present.
   return Promise.resolve();
 }
 
@@ -162,6 +172,89 @@ function registerTrayIpc(
     },
   );
   return router;
+}
+
+async function initializeUpdater(
+  win: BrowserWindow,
+  allowedOrigin: string,
+): Promise<UpdaterController | null> {
+  const autoUpdater = await resolveAutoUpdater();
+  if (autoUpdater === null) {
+    return null;
+  }
+  const controller = createUpdaterController({
+    autoUpdater,
+    onStateChange: (change: UpdaterStateChange) => {
+      if (win.isDestroyed()) return;
+      win.webContents.send(UPDATER_STATE_CHANGED_CHANNEL, change);
+    },
+  });
+  const router = createIpcRouter({ allowedOrigin, ipc: ipcMain });
+  router.register<void, void>(UPDATER_CHECK_FOR_UPDATES_CHANNEL, async () => {
+    await controller.checkForUpdates();
+  });
+  return controller;
+}
+
+async function resolveAutoUpdater(): Promise<ElectronUpdaterLike | null> {
+  if (process.env.NIMBUS_DESKTOP_UPDATER_MOCK === "1") {
+    const mock = createMockAutoUpdater();
+    (
+      globalThis as { __nimbusTestAutoUpdater?: MockAutoUpdater }
+    ).__nimbusTestAutoUpdater = mock;
+    return mock;
+  }
+  // In non-packaged dev builds electron-updater refuses to run; skip
+  // wiring entirely so the renderer never sees stale events from a
+  // partial init. The DS5 verification path drives a mocked feed; the
+  // signed-release end-to-end proof rides on DS8 + DS9.
+  if (!app.isPackaged && process.env.NIMBUS_DESKTOP_UPDATER_FORCE !== "1") {
+    return null;
+  }
+  try {
+    const mod = (await import("electron-updater")) as unknown as {
+      autoUpdater: ElectronUpdaterLike;
+    };
+    return mod.autoUpdater;
+  } catch {
+    return null;
+  }
+}
+
+interface MockAutoUpdater extends ElectronUpdaterLike {
+  emit(event: string, ...args: unknown[]): void;
+}
+
+function createMockAutoUpdater(): MockAutoUpdater {
+  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  const bucket = (event: string) => {
+    let b = listeners.get(event);
+    if (!b) {
+      b = new Set();
+      listeners.set(event, b);
+    }
+    return b;
+  };
+  return {
+    autoDownload: undefined,
+    autoInstallOnAppQuit: undefined,
+    on(event: string, fn: (...args: unknown[]) => void) {
+      bucket(event).add(fn);
+      return this;
+    },
+    off(event: string, fn: (...args: unknown[]) => void) {
+      bucket(event).delete(fn);
+      return this;
+    },
+    async checkForUpdates() {
+      return null;
+    },
+    emit(event: string, ...args: unknown[]) {
+      for (const fn of bucket(event)) {
+        fn(...args);
+      }
+    },
+  };
 }
 
 function resolveTrayIconPath(): string {

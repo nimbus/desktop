@@ -12,14 +12,53 @@
 
 export const TRAY_SET_STATUS_DOT_CHANNEL = "nimbus:tray:setStatusDot" as const;
 
-export type IpcChannelName = typeof TRAY_SET_STATUS_DOT_CHANNEL;
+export const UPDATER_STATE_CHANGED_CHANNEL =
+  "nimbus:updater:state-changed" as const;
+
+export const UPDATER_CHECK_FOR_UPDATES_CHANNEL =
+  "nimbus:updater:checkForUpdates" as const;
+
+export type IpcChannelName =
+  | typeof TRAY_SET_STATUS_DOT_CHANNEL
+  | typeof UPDATER_STATE_CHANGED_CHANNEL
+  | typeof UPDATER_CHECK_FOR_UPDATES_CHANNEL;
 
 export type TrayStatusDot = "connected" | "reconnecting" | "offline";
 
+export type UpdaterState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+export interface UpdaterDownloadProgress {
+  readonly bytesPerSecond: number;
+  readonly percent: number;
+  readonly transferred: number;
+  readonly total: number;
+}
+
+export interface UpdaterStateChange {
+  readonly state: UpdaterState;
+  readonly version?: string;
+  readonly releaseNotes?: string;
+  readonly progress?: UpdaterDownloadProgress;
+  readonly message?: string;
+}
+
+export type UpdaterStateListener = (change: UpdaterStateChange) => void;
+
 export interface NimbusShell {
-  readonly __version: "ds4";
+  readonly __version: "ds5";
   readonly tray: {
     readonly setStatusDot: (state: TrayStatusDot) => Promise<void>;
+  };
+  readonly updater: {
+    readonly onStateChange: (listener: UpdaterStateListener) => () => void;
+    readonly checkForUpdates: () => Promise<void>;
   };
 }
 
