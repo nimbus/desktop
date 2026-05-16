@@ -322,3 +322,112 @@ jobs:
             release/latest-*.yml
           if-no-files-found: error
           retention-days: 30
+
+  # ── Homebrew Cask auto-publish ─────────────────────────────────────
+  # Runs once after the matrix succeeds, only for real release tags
+  # (not v0.0.0-dryrun-*). Pulls the published universal DMG from the
+  # GitHub Release the matrix just produced, hashes it, and PUTs an
+  # updated `Casks/nimbus-desktop.rb` into nimbus/homebrew-tap via the
+  # org-scoped `HOMEBREW_TAP_*` GitHub App credentials (same App used
+  # by nimbus/nimbus to publish its CLI cask).
+  #
+  # Why a GitHub App and not GITHUB_TOKEN: the matrix job's
+  # GITHUB_TOKEN is scoped to this repo only; cross-repo writes
+  # require the App's installation token with `homebrew-tap` selected
+  # and `contents: write` granted.
+  homebrew-cask:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, 'dryrun')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Create Homebrew tap token
+        id: homebrew_tap_token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ vars.HOMEBREW_TAP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: nimbus
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Download universal DMG from this release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          mkdir -p /tmp/dmg
+          # The mac-universal target produces a single
+          # `nimbus-desktop-${VERSION}-universal.dmg` published by
+          # electron-builder via --publish onTagOrDraft.
+          gh release download "$TAG" \
+            -R "${{ github.repository }}" \
+            --pattern "nimbus-desktop-${VERSION}-universal.dmg" \
+            --dir /tmp/dmg
+          ls -la /tmp/dmg
+
+      - name: Update Homebrew cask
+        env:
+          GH_TOKEN: ${{ steps.homebrew_tap_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          DMG="/tmp/dmg/nimbus-desktop-${VERSION}-universal.dmg"
+          SHA_DMG=$(shasum -a 256 "$DMG" | awk '{print $1}')
+
+          cat > /tmp/nimbus-desktop.rb << CASKEOF
+          cask "nimbus-desktop" do
+            name "Nimbus Desktop"
+            desc "Native desktop shell for the Nimbus operator console"
+            homepage "https://github.com/nimbus/desktop"
+            version "${VERSION}"
+
+            livecheck do
+              skip "Auto-generated on release."
+            end
+
+            auto_updates true
+            depends_on macos: ">= :sonoma"
+
+            url "https://github.com/nimbus/desktop/releases/download/v#{version}/nimbus-desktop-#{version}-universal.dmg"
+            sha256 "${SHA_DMG}"
+
+            app "nimbus-desktop.app"
+
+            zap trash: [
+              "~/Library/Application Support/nimbus-desktop",
+              "~/Library/Caches/com.nimbus.desktop",
+              "~/Library/Caches/com.nimbus.desktop.ShipIt",
+              "~/Library/Logs/nimbus-desktop",
+              "~/Library/Preferences/com.nimbus.desktop.plist",
+              "~/Library/Saved Application State/com.nimbus.desktop.savedState",
+            ]
+          end
+          CASKEOF
+
+          # Strip the heredoc indent.
+          sed -i 's/^          //' /tmp/nimbus-desktop.rb
+          echo "::group::generated cask"
+          cat /tmp/nimbus-desktop.rb
+          echo "::endgroup::"
+
+          FILE_SHA=$(gh api repos/nimbus/homebrew-tap/contents/Casks/nimbus-desktop.rb --jq '.sha' 2>/dev/null || echo "")
+          if [ -n "$FILE_SHA" ]; then
+            gh api repos/nimbus/homebrew-tap/contents/Casks/nimbus-desktop.rb \
+              --method PUT \
+              --field message="Update nimbus-desktop to ${VERSION}" \
+              --field content="$(base64 -w0 /tmp/nimbus-desktop.rb)" \
+              --field sha="$FILE_SHA" \
+              --silent
+          else
+            gh api repos/nimbus/homebrew-tap/contents/Casks/nimbus-desktop.rb \
+              --method PUT \
+              --field message="Add nimbus-desktop cask at ${VERSION}" \
+              --field content="$(base64 -w0 /tmp/nimbus-desktop.rb)" \
+              --silent
+          fi
