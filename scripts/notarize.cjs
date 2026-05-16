@@ -4,9 +4,11 @@
 // DS8 contract: electron-builder afterSign hook. After electron-builder
 // has produced and Developer-ID-signed the packed .app on macOS, ship
 // the .app to Apple's notarytool service and block until notarization
-// completes (or fails). The DMG stapling is handled separately by
-// electron-builder's own postSign step once the .app inside it has a
-// notarization ticket attached.
+// completes (or fails). Stapling the ticket onto the DMG itself is
+// handled by scripts/staple-dmg.cjs from the afterAllArtifactBuild
+// hook — electron-builder 26.x does not staple DMGs automatically,
+// proven on tag v0.0.0-dryrun-6 where `stapler validate` on the DMG
+// failed even after the .app inside it carried a valid ticket.
 //
 // Authentication path: App Store Connect API key (decision 001). The
 // release workflow:

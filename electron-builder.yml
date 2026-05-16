@@ -19,10 +19,14 @@ executableName: nimbus-desktop
 copyright: Copyright © 2026 Nimbus
 asar: true
 afterPack: scripts/flip-fuses.cjs
-# DS8: macOS-only notarization hook. No-op on win/linux and when Apple
+# DS8: macOS-only notarization hooks. No-op on win/linux and when Apple
 # API credentials are absent (dry-run / package-only matrix). Activated
 # in DS9 release CI once secrets are present in the runner env.
+#   afterSign:              notarize + staple the .app inside the bundle.
+#   afterAllArtifactBuild:  notarize + staple the .dmg files separately so
+#                           offline Gatekeeper checks pass on the DMG too.
 afterSign: scripts/notarize.cjs
+afterAllArtifactBuild: scripts/staple-dmg.cjs
 directories:
   output: release
   buildResources: build
