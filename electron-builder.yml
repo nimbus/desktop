@@ -42,6 +42,7 @@ extraMetadata:
 # ── macOS ──────────────────────────────────────────────────────────
 mac:
   category: public.app-category.developer-tools
+  icon: buildResources/icon.icns
   # Hardened runtime is mandatory for Developer ID notarization. The
   # entitlements file allows V8 JIT + unsigned executable memory (both
   # required by Electron under the hardened runtime) + outbound
@@ -68,6 +69,7 @@ dmg:
 
 # ── Windows ────────────────────────────────────────────────────────
 win:
+  icon: buildResources/icon.ico
   # DS8: routes per-artifact signing through scripts/sign-windows.cjs,
   # which is a no-op until decision 002 flips from "accepted (DS0A);
   # activation deferred" to "accepted — active" (Trusted Signing
@@ -93,6 +95,7 @@ nsis:
 
 # ── Linux ──────────────────────────────────────────────────────────
 linux:
+  icon: buildResources/icon.png
   category: Development
   synopsis: "Native desktop shell for the Nimbus operator console."
   # FpmTarget (used by both deb and rpm) requires a maintainer
