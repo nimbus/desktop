@@ -77,6 +77,12 @@ in the background, and installs on the next operator-initiated quit
 (never a forced restart). Signature verification is enforced
 end-to-end; an update with a broken signature is rejected.
 
+The desktop shell and the `nimbus` CLI it spawns update on independent
+cadences. For the full picture — how the CLI updates, what the staleness
+indicators in the SPA mean, what the in-app **Update** button does, and
+how to disable update checks on air-gapped hosts — see
+[`docs/operating/updates.md` in `nimbus/nimbus`](https://github.com/nimbus/nimbus/blob/main/docs/operating/updates.md).
+
 ## Troubleshooting
 
 ### "No nimbus server discovered"
