@@ -1,13 +1,21 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, type BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import {
+  app,
+  type BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  Notification,
+} from "electron";
 import {
   TRAY_SET_STATUS_DOT_CHANNEL,
   UPDATER_CHECK_FOR_UPDATES_CHANNEL,
   UPDATER_STATE_CHANGED_CHANNEL,
   type UpdaterStateChange,
 } from "../shared/ipc-types.js";
+import { type CliLifecycle, installCliLifecycle } from "./cli-lifecycle.js";
 import { createIpcRouter, type IpcRouter } from "./ipc.js";
 import { buildAppMenu, type MenuPlatform } from "./menu.js";
 import { installSecurityRestrictions } from "./security.js";
@@ -87,7 +95,11 @@ export async function main(): Promise<void> {
 
   await app.whenReady();
 
-  let envelope: ServerEnvelope;
+  const userDataDir = app.getPath("userData");
+  const initialBounds = await loadWindowState(userDataDir);
+
+  let envelope: ServerEnvelope | null = null;
+  let lastError: unknown = null;
   try {
     envelope = await resolveServer({
       ensure: true,
@@ -97,20 +109,30 @@ export async function main(): Promise<void> {
       },
     });
   } catch (error) {
-    presentFatalError(error);
-    app.quit();
-    return;
+    lastError = error;
+    if (!(error instanceof NimbusBinaryNotFoundError)) {
+      presentFatalError(error);
+      app.quit();
+      return;
+    }
   }
-  nimbusUrl = envelope.url;
 
-  const allowedOrigin = originOf(envelope.url, ALLOWED_ORIGIN_FALLBACK);
+  if (envelope) nimbusUrl = envelope.url;
+
+  // For the cli-not-found path we still need to construct a window so
+  // the renderer-side bridge can be reached. The setup card lives on
+  // file:// so its allowed origin is the empty file scheme; the
+  // CLI-lifecycle channels are gated by isAllowedOrigin which accepts
+  // `file://` for the bootstrap path only.
+  const allowedOrigin = envelope
+    ? originOf(envelope.url, ALLOWED_ORIGIN_FALLBACK)
+    : ALLOWED_ORIGIN_FALLBACK;
   installSecurityRestrictions(app, { allowedOrigin });
 
-  const userDataDir = app.getPath("userData");
-  const initialBounds = await loadWindowState(userDataDir);
+  const initialUrl = envelope ? envelope.url : cliNotFoundFileUrl();
 
   const win = createMainWindow({
-    url: envelope.url,
+    url: initialUrl,
     preloadPath: defaultPreloadPath(),
     bounds: initialBounds,
     onBoundsChanged: (bounds) => {
@@ -128,7 +150,9 @@ export async function main(): Promise<void> {
             type: "info",
             title: "About Nimbus",
             message: "Nimbus Desktop",
-            detail: `Server: ${envelope.url}\nOrigin: ${envelope.origin}`,
+            detail: envelope
+              ? `Server: ${envelope.url}\nOrigin: ${envelope.origin}`
+              : "Nimbus CLI not installed yet — running the setup card.",
           }),
         onQuit: () => app.quit(),
       }),
@@ -140,16 +164,101 @@ export async function main(): Promise<void> {
     handlers: {
       onOpenConsole: () => openConsole(win),
       onStartServer: () => onStartServer(),
-      onStopServer: () => onStopServer(envelope),
-      onRestartServer: () => onRestartServer(envelope, win),
+      onStopServer: () =>
+        envelope ? onStopServer(envelope) : Promise.resolve(),
+      onRestartServer: () =>
+        envelope ? onRestartServer(envelope, win) : Promise.resolve(),
       onQuit: () => app.quit(),
     },
-    initialStatus: "connected",
+    initialStatus: envelope ? "connected" : "offline",
   });
 
   registerTrayIpc(allowedOrigin, tray);
 
   await initializeUpdater(win, allowedOrigin);
+
+  let cliLifecycle: CliLifecycle | null = null;
+  if (envelope) {
+    cliLifecycle = installCliLifecycle({
+      window: win,
+      ipc: ipcMain,
+      allowedOrigin,
+      serverUrl: envelope.url.replace(/ui\/?$/, ""),
+      userDataDir,
+      Notification: Notification as unknown as Parameters<
+        typeof installCliLifecycle
+      >[0]["Notification"],
+      onShow: () => openConsole(win),
+      restartHook: async () => {
+        if (nimbusHandle && nimbusUrl) {
+          try {
+            await shutdownSpawnedServer(
+              nimbusUrl,
+              nimbusHandle.pid,
+              nimbusHandle.child,
+            );
+          } catch {}
+        }
+        const next = await resolveServer({
+          ensure: true,
+          onSpawn: (handle) => {
+            nimbusHandle = handle;
+          },
+        });
+        nimbusUrl = next.url;
+        await win.loadURL(next.url);
+        const newVersion = await fetchCurrentVersion(next.url);
+        return { newVersion, newUrl: next.url };
+      },
+      retryResolveHook: async () => {
+        try {
+          const next = await resolveServer({
+            ensure: true,
+            onSpawn: (handle) => {
+              nimbusHandle = handle;
+            },
+          });
+          nimbusUrl = next.url;
+          await win.loadURL(next.url);
+          return { ok: true };
+        } catch {
+          return { ok: false };
+        }
+      },
+    });
+    cliLifecycle.start();
+  } else if (lastError instanceof NimbusBinaryNotFoundError) {
+    // Set up the lifecycle bridge so the setup card can call into
+    // window.nimbus.canRunInstall / runInstall / retryResolveCli.
+    cliLifecycle = installCliLifecycle({
+      window: win,
+      ipc: ipcMain,
+      allowedOrigin,
+      serverUrl: "http://127.0.0.1/",
+      userDataDir,
+      Notification: null,
+      onShow: () => openConsole(win),
+      restartHook: async () => {
+        throw new Error("no nimbus server running");
+      },
+      retryResolveHook: async () => {
+        try {
+          const next = await resolveServer({
+            ensure: true,
+            onSpawn: (handle) => {
+              nimbusHandle = handle;
+            },
+          });
+          nimbusUrl = next.url;
+          await win.loadURL(next.url);
+          return { ok: true };
+        } catch {
+          return { ok: false };
+        }
+      },
+    });
+    cliLifecycle.signalCliNotFound();
+  }
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
@@ -314,6 +423,31 @@ function resolveTrayIconPath(): string {
   // In the packaged app the buildResources directory is bundled under
   // the asar root next to dist/.
   return path.join(here, "..", "..", "buildResources", "trayTemplate.png");
+}
+
+function cliNotFoundFileUrl(): string {
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  const filePath = path.join(
+    here,
+    "..",
+    "..",
+    "buildResources",
+    "setup",
+    "cli-not-found.html",
+  );
+  return `file://${filePath}`;
+}
+
+async function fetchCurrentVersion(serverUrl: string): Promise<string> {
+  const base = serverUrl.replace(/ui\/?$/, "");
+  try {
+    const res = await fetch(`${base}api/system/version-info`);
+    if (!res.ok) return "unknown";
+    const info = (await res.json()) as { current?: string };
+    return info.current ?? "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 function originOf(serverUrl: string, fallback: string): string {

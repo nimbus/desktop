@@ -12,11 +12,19 @@ import {
 } from "./ipc-types.js";
 
 describe("ipc-types", () => {
-  it("DS5 IpcChannelName is the union of tray + updater channels", () => {
+  it("IpcChannelName is the union of tray + updater + UL3 cli channels", () => {
     expectTypeOf<IpcChannelName>().toEqualTypeOf<
       | "nimbus:tray:setStatusDot"
       | "nimbus:updater:state-changed"
       | "nimbus:updater:checkForUpdates"
+      | "nimbus:cli:canRunUpgrade"
+      | "nimbus:cli:canRunInstall"
+      | "nimbus:cli:runUpgrade"
+      | "nimbus:cli:runInstall"
+      | "nimbus:cli:runnerEvent"
+      | "nimbus:cli:retryResolveCli"
+      | "nimbus:cli:staleness"
+      | "nimbus:cli:notFound"
     >();
     expect(TRAY_SET_STATUS_DOT_CHANNEL).toBe("nimbus:tray:setStatusDot");
     expect(UPDATER_STATE_CHANGED_CHANNEL).toBe("nimbus:updater:state-changed");

@@ -43,6 +43,13 @@ vi.mock("electron", () => {
     nativeImage: {
       createFromPath: vi.fn().mockReturnValue({ __isImage: true }),
     },
+    // biome-ignore lint/complexity/useArrowFunction: needs [[Construct]] for `new Notification(...)`
+    Notification: vi.fn().mockImplementation(function () {
+      return {
+        show: vi.fn(),
+        on: vi.fn(),
+      };
+    }),
     // biome-ignore lint/complexity/useArrowFunction: needs [[Construct]] for `new BrowserWindow(...)`
     BrowserWindow: vi.fn().mockImplementation(function (opts: unknown) {
       return {

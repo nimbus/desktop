@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';" />
+    <title>Install Nimbus</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #14181d;
+        --panel-2: #1a1f25;
+        --border: #262d36;
+        --text: #e7ebef;
+        --muted: #8a93a0;
+        --accent: #5b8def;
+        --success: #5ed3a0;
+        --danger: #e07b7b;
+        font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        padding: 32px;
+      }
+      .card {
+        width: 100%;
+        max-width: 540px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 28px 32px;
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      p {
+        margin: 0 0 16px 0;
+        color: var(--muted);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 20px;
+        align-items: center;
+      }
+      button {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        font: inherit;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #0b0d10;
+      }
+      button.primary:hover {
+        filter: brightness(1.05);
+      }
+      button.ghost:hover {
+        background: var(--panel);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: progress;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .progress {
+        margin-top: 20px;
+        max-height: 220px;
+        overflow: auto;
+        padding: 10px 12px;
+        background: #060809;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+        font-size: 12px;
+        color: #b9c1cc;
+        white-space: pre-wrap;
+        display: none;
+      }
+      .progress.active {
+        display: block;
+      }
+      .status {
+        margin-top: 12px;
+        font-size: 12px;
+      }
+      .status.success {
+        color: var(--success);
+      }
+      .status.error {
+        color: var(--danger);
+      }
+      details {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      details summary {
+        cursor: pointer;
+      }
+      code {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+        font-size: 11.5px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <h1>Nimbus isn't installed yet</h1>
+        <p>
+          The desktop console needs the <code>nimbus</code> CLI on PATH. Install
+          it once, then this window will reload into the operator console.
+        </p>
+        <div class="actions">
+          <button id="install" class="primary" hidden>Install with Homebrew</button>
+          <button id="retry" class="ghost">Retry</button>
+          <a id="docs" href="https://github.com/nimbus/nimbus#install" target="_blank" rel="noreferrer">
+            Install docs
+          </a>
+        </div>
+        <pre id="progress" class="progress"></pre>
+        <div id="status" class="status"></div>
+        <details>
+          <summary>Installed via a different method?</summary>
+          <p style="margin-top: 8px">
+            If you ran <code>curl https://nimbus.dev/install | sh</code> or built
+            from source, click Retry — the shell rescans PATH and continues into
+            the console.
+          </p>
+        </details>
+      </section>
+    </main>
+    <script>
+      (function () {
+        var bridge = window.nimbus;
+        if (!bridge) {
+          document.getElementById("status").textContent =
+            "Desktop bridge unavailable. Re-run the installer or use the install docs link.";
+          document.getElementById("status").className = "status error";
+          return;
+        }
+
+        var installBtn = document.getElementById("install");
+        var retryBtn = document.getElementById("retry");
+        var progress = document.getElementById("progress");
+        var status = document.getElementById("status");
+
+        function setStatus(msg, kind) {
+          status.textContent = msg || "";
+          status.className = "status" + (kind ? " " + kind : "");
+        }
+
+        function appendLine(prefix, line) {
+          progress.classList.add("active");
+          progress.textContent += (prefix ? prefix + " " : "") + line + "\n";
+          progress.scrollTop = progress.scrollHeight;
+        }
+
+        bridge.canRunInstall("brew").then(function (ok) {
+          if (ok) installBtn.hidden = false;
+        });
+
+        installBtn.addEventListener("click", function () {
+          installBtn.disabled = true;
+          retryBtn.disabled = true;
+          setStatus("Running brew install…", "");
+          progress.textContent = "";
+          (async function () {
+            try {
+              var stream = bridge.runInstall("brew");
+              var iter = stream[Symbol.asyncIterator]();
+              while (true) {
+                var step = await iter.next();
+                if (step.done) break;
+                var event = step.value;
+                if (event.kind === "stdout") appendLine("", event.line);
+                else if (event.kind === "stderr") appendLine("[stderr]", event.line);
+                else if (event.kind === "error") {
+                  setStatus(event.message, "error");
+                  installBtn.disabled = false;
+                  retryBtn.disabled = false;
+                  return;
+                } else if (event.kind === "exit") {
+                  if (event.code === 0) {
+                    setStatus("Installed. Verifying…", "success");
+                    var resolved = await bridge.retryResolveCli();
+                    if (!resolved.ok) {
+                      setStatus(
+                        "Install completed but nimbus is still not on PATH. Open a new terminal and run 'nimbus --version' to confirm.",
+                        "error",
+                      );
+                      installBtn.disabled = false;
+                      retryBtn.disabled = false;
+                    }
+                  } else {
+                    setStatus("brew exited with code " + event.code + ".", "error");
+                    installBtn.disabled = false;
+                    retryBtn.disabled = false;
+                  }
+                }
+              }
+            } catch (err) {
+              setStatus("Install failed: " + (err && err.message ? err.message : String(err)), "error");
+              installBtn.disabled = false;
+              retryBtn.disabled = false;
+            }
+          })();
+        });
+
+        retryBtn.addEventListener("click", function () {
+          retryBtn.disabled = true;
+          installBtn.disabled = true;
+          setStatus("Rescanning PATH…", "");
+          bridge.retryResolveCli().then(function (result) {
+            if (!result.ok) {
+              setStatus(
+                "Still no nimbus on PATH. Install via Homebrew or follow the install docs.",
+                "error",
+              );
+              retryBtn.disabled = false;
+              installBtn.disabled = false;
+            }
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>
