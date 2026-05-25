@@ -111,9 +111,10 @@ async function findOnSanitizedPath(
   access: (filePath: string) => Promise<boolean>,
 ): Promise<string | null> {
   const sep = platform === "win32" ? ";" : ":";
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
   for (const dir of sanitizedPath.split(sep)) {
     if (!dir) continue;
-    const candidate = path.join(dir, binary);
+    const candidate = pathApi.join(dir, binary);
     if (await access(candidate)) return candidate;
   }
   return null;
