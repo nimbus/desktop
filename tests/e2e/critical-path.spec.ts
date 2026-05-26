@@ -26,7 +26,7 @@ const REPO_ROOT = resolve(HERE, "..", "..");
 // `nimbus start`, must:
 //   1. Reach `http://127.0.0.1:<port>/ui/auth` (or `/ui/` redirect).
 //   2. Serve a CSP header with `script-src 'self'`.
-//   3. Render the auth form (admin-token input).
+//   3. Render the auth form (auth-token input).
 //   4. Accept a valid token via POST /ui/auth/session.
 //   5. Render the overview tab with all 6 count panels.
 //   6. Open the ⌘K command palette.
@@ -71,8 +71,15 @@ test.describe("DS7 critical path", () => {
       const page = context.pages()[0] ?? (await context.waitForEvent("page"));
       await page.waitForLoadState("domcontentloaded");
       expect(page.url()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/ui\//);
-      await expect(page.getByRole("heading", { name: "Nimbus" })).toBeVisible();
-      await expect(page.getByLabel(/admin token/i)).toBeVisible();
+      await expect(
+        page.getByRole("main", { name: "Sign in to Nimbus" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("form", { name: "Auth token sign in" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("textbox", { name: "Enter auth token" }),
+      ).toBeVisible();
     } finally {
       // `connectOverCDP` opens an extra ws connection. Closing the
       // Browser handle here detaches the test from the running shell
