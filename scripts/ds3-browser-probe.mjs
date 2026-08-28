@@ -19,7 +19,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,12 +51,52 @@ await mkdir(dirname(SCREENSHOT_PATH), { recursive: true });
 const scratchRoot = await mkdtemp(join(tmpdir(), "nimbus-desktop-ds3-"));
 const scratchTmp = join(scratchRoot, "tmp");
 const userDataDir = join(scratchRoot, "userData");
+const serverDiscoveryPath = join(scratchTmp, "nimbus", "server.json");
 await mkdir(scratchTmp, { recursive: true });
 await mkdir(userDataDir, { recursive: true });
 
 function listPidsForPath(targetPath) {
   const out = spawnSync("pgrep", ["-f", targetPath], { encoding: "utf8" });
   return (out.stdout ?? "").trim().split("\n").filter(Boolean);
+}
+
+function processCommand(pid) {
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+    encoding: "utf8",
+  });
+  return result.status === 0 ? (result.stdout ?? "").trim() : "";
+}
+
+async function readSpawnedServer() {
+  try {
+    const record = JSON.parse(await readFile(serverDiscoveryPath, "utf8"));
+    if (!Number.isSafeInteger(record.pid) || record.pid <= 0) return null;
+    const command = processCommand(record.pid);
+    return command ? { pid: record.pid, command } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForRecordedProcessExit(record, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (processCommand(record.pid) !== record.command) return true;
+    await delay(100);
+  }
+  return processCommand(record.pid) !== record.command;
+}
+
+async function stopRecordedServer(record) {
+  if (!record || processCommand(record.pid) !== record.command) return true;
+  try {
+    process.kill(-record.pid, "SIGTERM");
+  } catch {}
+  if (await waitForRecordedProcessExit(record, SHUTDOWN_GRACE_MS)) return true;
+  try {
+    process.kill(-record.pid, "SIGKILL");
+  } catch {}
+  return waitForRecordedProcessExit(record, 2_000);
 }
 
 console.log("DS3 probe — launching packaged shell:", APP_BUNDLE);
@@ -88,10 +128,12 @@ child.once("exit", () => {
 });
 
 let exitCode = 0;
+let spawnedServer = null;
 try {
   let rendererPids = [];
   const deadline = Date.now() + RENDERER_TIMEOUT_MS;
   while (!childExited && Date.now() < deadline) {
+    spawnedServer ??= await readSpawnedServer();
     const psOut = spawnSync("ps", ["-Ao", "pid=,command="], {
       encoding: "utf8",
     });
@@ -106,6 +148,7 @@ try {
     if (rendererPids.length > 0) break;
     await delay(250);
   }
+  spawnedServer ??= await readSpawnedServer();
 
   // The direct child pid is exact. Keep the path-scoped lookup as evidence
   // that the running process still belongs to this packaged app bundle.
@@ -115,10 +158,12 @@ try {
   console.log("DS3 probe — packaged main process PIDs:", mainPids);
 
   console.log("DS3 probe — renderer subprocess PIDs:", rendererPids);
+  console.log("DS3 probe — spawned Nimbus PID:", spawnedServer?.pid ?? null);
 
   const checks = {
     main_alive: mainPids.length >= 1,
     renderer_alive: rendererPids.length >= 1,
+    spawned_server_recorded: spawnedServer !== null,
   };
 
   // Capture a screenshot of the active app window via the window id
@@ -177,7 +222,15 @@ try {
       } catch {}
     }
   }
-  await rm(scratchRoot, { recursive: true, force: true });
+  const serverStopped = await stopRecordedServer(spawnedServer);
+  if (!serverStopped) {
+    console.error(
+      `DS3 probe FAILED — Nimbus PID ${spawnedServer?.pid ?? "unknown"} remained live; preserving ${scratchRoot} for diagnosis`,
+    );
+    exitCode = 1;
+  } else {
+    await rm(scratchRoot, { recursive: true, force: true });
+  }
 }
 
 process.exit(exitCode);

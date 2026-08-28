@@ -194,18 +194,25 @@ describe("resolveServer", () => {
       exitCode: 48,
       signalCode: null,
     } as unknown as ChildProcess;
+    const serverDataDir = path.join(workdir, "server");
+    const spawn = vi.fn(() => ({ pid: 4242, child }));
     await expect(
       resolveServer({
         ensure: true,
+        serverDataDir,
         paths: {
           authTokenPath: path.join(workdir, "token"),
           serverDiscoveryPath: path.join(workdir, "server.json"),
           auditLogPath: path.join(workdir, "logs.jsonl"),
         },
         nimbusExecutable: "/fixture/nimbus",
-        spawn: () => ({ pid: 4242, child }),
+        spawn,
       }),
     ).rejects.toBeInstanceOf(ServerStartExitedError);
+    expect(spawn).toHaveBeenCalledWith(
+      "/fixture/nimbus",
+      buildServerSpawnArgs(serverDataDir),
+    );
   });
 
   it("throws NimbusBinaryNotFoundError when ensure=true and no nimbus binary is reachable", async () => {
