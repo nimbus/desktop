@@ -102,7 +102,13 @@ function signalRecordedProcess(record, signal) {
 }
 
 async function stopRecordedServer(record) {
-  if (!record || processCommand(record.pid) !== record.command) {
+  if (!record) {
+    return {
+      stopped: false,
+      failures: ["spawned Nimbus discovery record was not observed"],
+    };
+  }
+  if (processCommand(record.pid) !== record.command) {
     return { stopped: true, failures: [] };
   }
   const failures = [];
@@ -165,7 +171,7 @@ try {
       )
       .map((line) => line.trim().split(/\s+/, 1)[0])
       .filter(Boolean);
-    if (rendererPids.length > 0 && spawnedServer !== null) break;
+    if (rendererPids.length > 0 && spawnedServer != null) break;
     await delay(250);
   }
   spawnedServer ??= await readSpawnedServer();
