@@ -209,10 +209,15 @@ describe("resolveServer", () => {
         spawn,
       }),
     ).rejects.toBeInstanceOf(ServerStartExitedError);
-    expect(spawn).toHaveBeenCalledWith(
-      "/fixture/nimbus",
-      buildServerSpawnArgs(serverDataDir),
-    );
+    expect(spawn).toHaveBeenCalledWith("/fixture/nimbus", [
+      "start",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "0",
+      "--data-dir",
+      serverDataDir,
+    ]);
   });
 
   it("throws NimbusBinaryNotFoundError when ensure=true and no nimbus binary is reachable", async () => {

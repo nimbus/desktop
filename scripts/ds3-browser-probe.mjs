@@ -87,16 +87,36 @@ async function waitForRecordedProcessExit(record, timeoutMs) {
   return processCommand(record.pid) !== record.command;
 }
 
+function signalRecordedProcess(record, signal) {
+  const failures = [];
+  for (const target of [-record.pid, record.pid]) {
+    try {
+      process.kill(target, signal);
+      return null;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : error;
+      failures.push(`${target}:${String(code)}`);
+    }
+  }
+  return `${signal} failed (${failures.join(", ")})`;
+}
+
 async function stopRecordedServer(record) {
-  if (!record || processCommand(record.pid) !== record.command) return true;
-  try {
-    process.kill(-record.pid, "SIGTERM");
-  } catch {}
-  if (await waitForRecordedProcessExit(record, SHUTDOWN_GRACE_MS)) return true;
-  try {
-    process.kill(-record.pid, "SIGKILL");
-  } catch {}
-  return waitForRecordedProcessExit(record, 2_000);
+  if (!record || processCommand(record.pid) !== record.command) {
+    return { stopped: true, failures: [] };
+  }
+  const failures = [];
+  const termFailure = signalRecordedProcess(record, "SIGTERM");
+  if (termFailure) failures.push(termFailure);
+  if (await waitForRecordedProcessExit(record, SHUTDOWN_GRACE_MS)) {
+    return { stopped: true, failures };
+  }
+  const killFailure = signalRecordedProcess(record, "SIGKILL");
+  if (killFailure) failures.push(killFailure);
+  return {
+    stopped: await waitForRecordedProcessExit(record, 2_000),
+    failures,
+  };
 }
 
 console.log("DS3 probe — launching packaged shell:", APP_BUNDLE);
@@ -145,7 +165,7 @@ try {
       )
       .map((line) => line.trim().split(/\s+/, 1)[0])
       .filter(Boolean);
-    if (rendererPids.length > 0) break;
+    if (rendererPids.length > 0 && spawnedServer !== null) break;
     await delay(250);
   }
   spawnedServer ??= await readSpawnedServer();
@@ -222,10 +242,10 @@ try {
       } catch {}
     }
   }
-  const serverStopped = await stopRecordedServer(spawnedServer);
-  if (!serverStopped) {
+  const serverCleanup = await stopRecordedServer(spawnedServer);
+  if (!serverCleanup.stopped) {
     console.error(
-      `DS3 probe FAILED — Nimbus PID ${spawnedServer?.pid ?? "unknown"} remained live; preserving ${scratchRoot} for diagnosis`,
+      `DS3 probe FAILED — Nimbus PID ${spawnedServer?.pid ?? "unknown"} remained live (${serverCleanup.failures.join("; ") || "signals sent but process stayed live"}); preserving ${scratchRoot} for diagnosis`,
     );
     exitCode = 1;
   } else {
