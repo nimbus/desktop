@@ -2,8 +2,9 @@
 // DS1 browser-driven verification probe.
 //
 // Launches the built Electron app via Playwright's _electron API,
-// attaches to the renderer, and asserts:
-//   - the renderer reaches the DS1 placeholder URL (https://example.org/)
+// attaches to the renderer, and asserts the DS1 security primitives remain
+// intact after the later DS2 live-server integration:
+//   - the renderer reaches a loopback Nimbus URL under /ui/
 //   - `typeof process` is "undefined" (sandbox proof)
 //   - `window.nimbusShell.__version === "ds1"` (contextBridge proof)
 //   - `window.nimbusShell` is frozen (immutable bridge surface)
@@ -19,7 +20,6 @@ import { dirname, resolve } from "node:path";
 
 import { _electron as electron } from "playwright";
 
-const PLACEHOLDER_URL = "https://example.org/";
 const ENTRY = resolve("./dist/main/index.js");
 const SCREENSHOT_PATH = resolve("./.playwright-cli/ds1-probe.png");
 
@@ -55,7 +55,8 @@ try {
   }));
 
   const checks = {
-    url: url.startsWith(PLACEHOLDER_URL),
+    url_loopback: url.startsWith("http://127.0.0.1:"),
+    url_under_ui: url.includes("/ui/"),
     sandbox_no_process: probe.processType === "undefined",
     sandbox_no_require: probe.requireType === "undefined",
     sandbox_no_buffer: probe.bufferType === "undefined",

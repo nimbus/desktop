@@ -14,6 +14,7 @@ vi.mock("electron", () => {
   return {
     app: {
       whenReady: vi.fn().mockResolvedValue(undefined),
+      setName: vi.fn(),
       on: vi.fn(),
       quit: vi.fn(),
       exit: vi.fn(),
@@ -95,11 +96,13 @@ describe("main — happy path against a discovered server", () => {
     const electron = (await import("electron")) as unknown as {
       app: {
         whenReady: ReturnType<typeof vi.fn>;
+        setName: ReturnType<typeof vi.fn>;
         on: ReturnType<typeof vi.fn>;
       };
       BrowserWindow: ReturnType<typeof vi.fn>;
     };
     electron.app.whenReady.mockClear();
+    electron.app.setName.mockClear();
     electron.app.on.mockClear();
     electron.BrowserWindow.mockClear();
     resolveServerMock.mockReset();
@@ -118,9 +121,13 @@ describe("main — happy path against a discovered server", () => {
 
     await main();
 
+    expect(electron.app.setName).toHaveBeenCalledWith("Nimbus Desktop");
     expect(electron.app.whenReady).toHaveBeenCalledOnce();
     expect(resolveServerMock).toHaveBeenCalledWith(
-      expect.objectContaining({ ensure: true }),
+      expect.objectContaining({
+        ensure: true,
+        serverDataDir: path.join(TEMP_USER_DATA, "server"),
+      }),
     );
     expect(electron.BrowserWindow).toHaveBeenCalledOnce();
     const instance = electron.BrowserWindow.mock.results[0]?.value as {

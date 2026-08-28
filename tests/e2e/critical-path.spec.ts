@@ -130,12 +130,11 @@ test.describe("DS7 critical path", () => {
         await expect(page.getByTestId(id)).toBeVisible();
       }
 
-      // ⌘K palette + ⌘\ tenant lens. Accelerators are routed through
-      // Electron's menu (DS4) AND a renderer-side keydown handler,
-      // so a `page.keyboard.press` is the right hook regardless of
-      // platform — the renderer treats Cmd and Ctrl interchangeably.
+      // ⌘K palette + ⌘\ tenant lens. These are renderer-side keydown
+      // contracts, so send the printable `k` value that the listener reads
+      // from KeyboardEvent.key. `KeyK` is a code, not that key value.
       const mod = process.platform === "darwin" ? "Meta" : "Control";
-      await page.keyboard.press(`${mod}+KeyK`);
+      await page.keyboard.press(`${mod}+k`);
       await expect(page.getByTestId("command-palette")).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(page.getByTestId("command-palette")).toBeHidden();

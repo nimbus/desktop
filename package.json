@@ -21,12 +21,12 @@
     "package:mac": "npm run build:main && electron-builder --mac --publish=never",
     "package:win": "npm run build:main && electron-builder --win --publish=never",
     "package:linux": "npm run build:main && electron-builder --linux --publish=never",
-    "verify:fuses": "node scripts/prepublish-check.cjs",
+    "verify:fuses": "node scripts/ds3-verify-fuses.mjs",
     "verify:ds3": "npm run package && node scripts/ds3-verify-fuses.mjs && node scripts/ds3-browser-probe.mjs",
     "verify:ds4": "npm run build:main && node scripts/ds4-bounds-probe.mjs",
     "verify:ds5": "npm run build:main && node scripts/ds5-updater-probe.mjs",
     "verify:installers": "node scripts/check-installer-sizes.cjs",
-    "verify:ds6": "npm run package:mac && node scripts/check-installer-sizes.cjs release",
+    "verify:ds6": "npm run package:mac && node scripts/prepublish-check.cjs release/mac-universal/nimbus-desktop.app/Contents/MacOS/nimbus-desktop && node scripts/check-installer-sizes.cjs release",
     "clean": "rm -rf dist release"
   },
   "dependencies": {

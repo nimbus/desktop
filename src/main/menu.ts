@@ -9,6 +9,8 @@ import type { MenuItemConstructorOptions } from "electron";
 
 export type MenuPlatform = "darwin" | "win32" | "linux";
 
+export const APP_DISPLAY_NAME = "Nimbus Desktop";
+
 export interface MenuHandlers {
   readonly onOpenConsole: () => void;
   readonly onAbout: () => void;
@@ -59,14 +61,22 @@ export function buildAppMenu(
 
   const helpMenu: MenuItemConstructorOptions = {
     label: "Help",
-    submenu: [{ label: "About Nimbus", click: () => handlers.onAbout() }],
+    submenu: [
+      {
+        label: `About ${APP_DISPLAY_NAME}`,
+        click: () => handlers.onAbout(),
+      },
+    ],
   };
 
   if (platform === "darwin") {
     const appMenu: MenuItemConstructorOptions = {
-      label: "Nimbus",
+      label: APP_DISPLAY_NAME,
       submenu: [
-        { label: "About Nimbus", click: () => handlers.onAbout() },
+        {
+          label: `About ${APP_DISPLAY_NAME}`,
+          click: () => handlers.onAbout(),
+        },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -74,7 +84,10 @@ export function buildAppMenu(
         { role: "hideOthers" },
         { role: "unhide" },
         { type: "separator" },
-        { label: "Quit Nimbus", click: () => handlers.onQuit() },
+        {
+          label: `Quit ${APP_DISPLAY_NAME}`,
+          click: () => handlers.onQuit(),
+        },
       ],
     };
     return [appMenu, fileMenu, editMenu, viewMenu, helpMenu];

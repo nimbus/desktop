@@ -6,20 +6,22 @@
 // blocks Playwright's `_electron.launch` from attaching to the
 // packaged shell. That refusal IS the proof: an attached debugger
 // would be a regression in the security posture. So this probe:
-//   1. Launches the packaged .app via macOS `open`.
+//   1. Launches the packaged app binary directly with isolated HOME, TMPDIR,
+//      Chromium user-data, and the caller's candidate-binary environment.
 //   2. Asserts the renderer subprocess (`--type=renderer`) is alive,
 //      proving the shell actually loaded its renderer and reached
 //      the live nimbus server.
 //   3. Captures a screenshot of the active app window.
-//   4. Quits the app gracefully via AppleScript (no broad pkill —
-//      that would risk killing the live `nimbus start` we depend on).
+//   4. Quits the exact process group gracefully (no broad pkill — that would
+//      risk killing an unrelated `nimbus start`).
 //
 // Exits 0 on success, 1 on assertion failure, 2 on setup failure.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -29,6 +31,8 @@ const PRODUCT = "nimbus-desktop";
 const APP_BUNDLE = resolve(ROOT, "release/mac-arm64", `${PRODUCT}.app`);
 const APP_BINARY = resolve(APP_BUNDLE, "Contents/MacOS", PRODUCT);
 const SCREENSHOT_PATH = resolve(ROOT, ".playwright-cli/ds3-probe.png");
+const RENDERER_TIMEOUT_MS = 60_000;
+const SHUTDOWN_GRACE_MS = 10_000;
 
 if (process.platform !== "darwin") {
   console.error(
@@ -44,6 +48,11 @@ if (!existsSync(APP_BUNDLE)) {
 }
 
 await mkdir(dirname(SCREENSHOT_PATH), { recursive: true });
+const scratchRoot = await mkdtemp(join(tmpdir(), "nimbus-desktop-ds3-"));
+const scratchTmp = join(scratchRoot, "tmp");
+const userDataDir = join(scratchRoot, "userData");
+await mkdir(scratchTmp, { recursive: true });
+await mkdir(userDataDir, { recursive: true });
 
 function listPidsForPath(targetPath) {
   const out = spawnSync("pgrep", ["-f", targetPath], { encoding: "utf8" });
@@ -51,42 +60,61 @@ function listPidsForPath(targetPath) {
 }
 
 console.log("DS3 probe — launching packaged shell:", APP_BUNDLE);
-const open = spawn("open", ["-a", APP_BUNDLE], { stdio: "ignore" });
-open.on("error", (err) => {
-  console.error("DS3 probe — `open` failed to launch:", err);
+const child = spawn(
+  APP_BINARY,
+  [
+    `--user-data-dir=${userDataDir}`,
+    "--use-mock-keychain",
+    "--password-store=basic",
+  ],
+  {
+    cwd: scratchRoot,
+    detached: true,
+    env: {
+      ...process.env,
+      HOME: scratchRoot,
+      TMPDIR: scratchTmp,
+      ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+const logChunks = [];
+child.stdout?.on("data", (chunk) => logChunks.push(chunk.toString("utf8")));
+child.stderr?.on("data", (chunk) => logChunks.push(chunk.toString("utf8")));
+let childExited = false;
+child.once("exit", () => {
+  childExited = true;
 });
 
 let exitCode = 0;
-const ourPids = new Set();
 try {
-  await delay(8_000);
+  let rendererPids = [];
+  const deadline = Date.now() + RENDERER_TIMEOUT_MS;
+  while (!childExited && Date.now() < deadline) {
+    const psOut = spawnSync("ps", ["-Ao", "pid=,command="], {
+      encoding: "utf8",
+    });
+    rendererPids = (psOut.stdout ?? "")
+      .split("\n")
+      .filter(
+        (line) =>
+          line.includes(APP_BUNDLE) && line.includes("--type=renderer"),
+      )
+      .map((line) => line.trim().split(/\s+/, 1)[0])
+      .filter(Boolean);
+    if (rendererPids.length > 0) break;
+    await delay(250);
+  }
 
-  // Scope every pgrep to the absolute packaged-app binary path so
-  // we never accidentally match the live `nimbus start` (which lives
-  // at /Users/jack/src/github.com/nimbus/nimbus/target/debug/nimbus).
-  const mainPids = listPidsForPath(APP_BINARY);
-  console.log("DS3 probe — packaged main process PIDs:", mainPids);
-  mainPids.forEach((p) => ourPids.add(p));
-
-  // Renderer-helper PIDs: pgrep is unreliable with paths containing
-  // parentheses, so list all processes whose absolute command line
-  // contains both this app bundle's absolute path AND `--type=renderer`.
-  // Scoping to APP_BUNDLE prevents matching other Electron apps.
-  const psOut = spawnSync(
-    "ps",
-    ["-Ao", "pid=,command="],
-    { encoding: "utf8" },
+  // The direct child pid is exact. Keep the path-scoped lookup as evidence
+  // that the running process still belongs to this packaged app bundle.
+  const mainPids = listPidsForPath(APP_BINARY).filter(
+    (pid) => pid === String(child.pid),
   );
-  const rendererPids = (psOut.stdout ?? "")
-    .split("\n")
-    .filter(
-      (line) =>
-        line.includes(APP_BUNDLE) && line.includes("--type=renderer"),
-    )
-    .map((line) => line.trim().split(/\s+/, 1)[0])
-    .filter(Boolean);
+  console.log("DS3 probe — packaged main process PIDs:", mainPids);
+
   console.log("DS3 probe — renderer subprocess PIDs:", rendererPids);
-  rendererPids.forEach((p) => ourPids.add(p));
 
   const checks = {
     main_alive: mainPids.length >= 1,
@@ -123,6 +151,9 @@ try {
       .filter(([, v]) => !v)
       .map(([k]) => k);
     console.error("DS3 probe FAILED — failing checks:", failing.join(", "));
+    if (logChunks.length > 0) {
+      console.error("DS3 probe — shell logs:\n", logChunks.join(""));
+    }
     exitCode = 1;
   } else {
     console.log(
@@ -130,22 +161,23 @@ try {
     );
   }
 } finally {
-  // Graceful quit via AppleScript first.
-  spawnSync(
-    "osascript",
-    ["-e", `tell application "${APP_BUNDLE}" to quit`],
-    { stdio: "ignore" },
-  );
-  await delay(1_500);
-  // Targeted kill of only the pids we identified above (never a
-  // broad pgrep that could match unrelated processes).
-  for (const pidStr of ourPids) {
-    const pid = Number.parseInt(pidStr, 10);
-    if (!Number.isFinite(pid) || pid <= 0) continue;
+  // SIGTERM enters Electron's before-quit handler, which in turn shuts down
+  // an app-spawned Nimbus child. Target only this exact process group.
+  if (!childExited && child.pid) {
     try {
-      process.kill(pid, "SIGTERM");
+      process.kill(-child.pid, "SIGTERM");
     } catch {}
+    const graceful = await Promise.race([
+      new Promise((resolve) => child.once("exit", () => resolve(true))),
+      delay(SHUTDOWN_GRACE_MS).then(() => false),
+    ]);
+    if (!graceful) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {}
+    }
   }
+  await rm(scratchRoot, { recursive: true, force: true });
 }
 
 process.exit(exitCode);

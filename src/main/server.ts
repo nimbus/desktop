@@ -49,6 +49,7 @@ export interface SpawnedServerHandle {
 
 export interface ResolveServerOptions {
   readonly ensure: boolean;
+  readonly serverDataDir?: string;
   readonly paths?: LocalServerPaths;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly pidChecker?: PidChecker;
@@ -58,6 +59,11 @@ export interface ResolveServerOptions {
   readonly readinessTimeoutMs?: number;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Test seam for deterministic child-lifecycle coverage. */
+  readonly spawn?: (
+    executable: string,
+    args: readonly string[],
+  ) => SpawnedServerHandle;
   // Called synchronously the moment nimbus has been spawned, before
   // we begin polling for readiness. The caller can use this to wire
   // shutdown cleanup against the handle so a quit signal arriving
@@ -80,6 +86,20 @@ export class ServerReadinessTimeoutError extends Error {
       `Timed out after ${timeoutMs} ms waiting for Nimbus server to become ready after spawning it.`,
     );
     this.name = "ServerReadinessTimeoutError";
+  }
+}
+
+export class ServerStartExitedError extends Error {
+  constructor(
+    readonly exitCode: number | null,
+    readonly signalCode: NodeJS.Signals | null,
+  ) {
+    const outcome =
+      exitCode !== null
+        ? `exit code ${exitCode}`
+        : `signal ${signalCode ?? "unknown"}`;
+    super(`Nimbus exited before it became ready (${outcome}).`);
+    this.name = "ServerStartExitedError";
   }
 }
 
@@ -141,11 +161,20 @@ export async function resolveServer(
 
   const executable =
     options.nimbusExecutable ?? (await resolveNimbusExecutable(env));
-  const handle = spawnDetached(executable);
+  const handle = (options.spawn ?? spawnDetached)(
+    executable,
+    buildServerSpawnArgs(options.serverDataDir),
+  );
   options.onSpawn?.(handle);
 
   const deadline = now() + readinessTimeoutMs;
   while (now() < deadline) {
+    if (handle.child.exitCode !== null || handle.child.signalCode !== null) {
+      throw new ServerStartExitedError(
+        handle.child.exitCode,
+        handle.child.signalCode,
+      );
+    }
     const record = await readLiveServerDiscovery(paths, pidChecker);
     if (record) {
       const url = buildUiUrl(record);
@@ -184,8 +213,21 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function spawnDetached(executable: string): SpawnedServerHandle {
-  const child = spawn(executable, ["start"], {
+export function buildServerSpawnArgs(serverDataDir?: string): string[] {
+  // A desktop-owned server must not compete with an unrelated process on
+  // Nimbus's conventional HTTP port. The discovery record carries the
+  // kernel-selected address back to the shell, so an ephemeral loopback port
+  // is both collision-free and invisible to the renderer contract.
+  const args = ["start", "--host", "127.0.0.1", "--port", "0"];
+  if (serverDataDir) args.push("--data-dir", serverDataDir);
+  return args;
+}
+
+function spawnDetached(
+  executable: string,
+  args: readonly string[],
+): SpawnedServerHandle {
+  const child = spawn(executable, args, {
     detached: true,
     stdio: "ignore",
     windowsHide: true,

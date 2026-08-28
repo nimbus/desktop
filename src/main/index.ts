@@ -17,7 +17,7 @@ import {
 } from "../shared/ipc-types.js";
 import { type CliLifecycle, installCliLifecycle } from "./cli-lifecycle.js";
 import { createIpcRouter, type IpcRouter } from "./ipc.js";
-import { buildAppMenu, type MenuPlatform } from "./menu.js";
+import { APP_DISPLAY_NAME, buildAppMenu, type MenuPlatform } from "./menu.js";
 import { installSecurityRestrictions } from "./security.js";
 import {
   NimbusBinaryNotFoundError,
@@ -25,6 +25,7 @@ import {
   type ServerEnvelope,
   ServerNotRunningError,
   ServerReadinessTimeoutError,
+  ServerStartExitedError,
   type SpawnedServerHandle,
 } from "./server.js";
 import {
@@ -46,6 +47,11 @@ const SHUTDOWN_GRACE_MS = 5_000;
 const QUIT_WAIT_FOR_SPAWN_MS = 3_000;
 
 export async function main(): Promise<void> {
+  // Electron derives role-owned native labels such as Hide and the macOS
+  // application-menu title from app.name. Without this override it exposes
+  // the scoped package identifier (`@nimbus/desktop`) to users.
+  app.setName(APP_DISPLAY_NAME);
+
   // The harness's SIGTERM (mapped by Electron to before-quit) can land
   // mid-readiness-wait — AFTER we've spawned nimbus but BEFORE
   // resolveServer has returned. Register a single before-quit handler
@@ -103,6 +109,7 @@ export async function main(): Promise<void> {
   try {
     envelope = await resolveServer({
       ensure: true,
+      serverDataDir: path.join(userDataDir, "server"),
       onSpawn: (handle) => {
         nimbusHandle = handle;
         resolveSpawned?.(handle);
@@ -148,8 +155,8 @@ export async function main(): Promise<void> {
         onAbout: () =>
           dialog.showMessageBox(win, {
             type: "info",
-            title: "About Nimbus",
-            message: "Nimbus Desktop",
+            title: `About ${APP_DISPLAY_NAME}`,
+            message: APP_DISPLAY_NAME,
             detail: envelope
               ? `Server: ${envelope.url}\nOrigin: ${envelope.origin}`
               : "Nimbus CLI not installed yet — running the setup card.",
@@ -463,6 +470,7 @@ function presentFatalError(error: unknown): void {
   const message =
     error instanceof ServerNotRunningError ||
     error instanceof ServerReadinessTimeoutError ||
+    error instanceof ServerStartExitedError ||
     error instanceof NimbusBinaryNotFoundError
       ? error.message
       : `Unexpected error: ${String(error)}`;

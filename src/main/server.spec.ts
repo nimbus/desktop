@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ServerDiscoveryRecord } from "./discovery.js";
 import {
+  buildServerSpawnArgs,
   buildUiUrl,
   NimbusBinaryNotFoundError,
   normalizeLoopbackAddress,
@@ -13,6 +15,7 @@ import {
   resolveServer,
   ServerNotRunningError,
   ServerReadinessTimeoutError,
+  ServerStartExitedError,
 } from "./server.js";
 
 let workdir: string;
@@ -72,6 +75,20 @@ describe("buildUiUrl", () => {
     expect(buildUiUrl({ ...SAMPLE, address: "0.0.0.0:9090" })).toBe(
       "http://127.0.0.1:9090/ui/",
     );
+  });
+});
+
+describe("buildServerSpawnArgs", () => {
+  it("uses an ephemeral loopback port and an explicit persistent data directory", () => {
+    expect(buildServerSpawnArgs("/writable/Nimbus Desktop/server")).toEqual([
+      "start",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "0",
+      "--data-dir",
+      "/writable/Nimbus Desktop/server",
+    ]);
   });
 });
 
@@ -170,6 +187,25 @@ describe("resolveServer", () => {
     expect(envelope.url).toBe("http://127.0.0.1:9090/ui/");
     expect(envelope.spawned).not.toBeNull();
     envelope.spawned?.child.kill("SIGTERM");
+  });
+
+  it("fails immediately when the spawned server exits before discovery", async () => {
+    const child = {
+      exitCode: 48,
+      signalCode: null,
+    } as unknown as ChildProcess;
+    await expect(
+      resolveServer({
+        ensure: true,
+        paths: {
+          authTokenPath: path.join(workdir, "token"),
+          serverDiscoveryPath: path.join(workdir, "server.json"),
+          auditLogPath: path.join(workdir, "logs.jsonl"),
+        },
+        nimbusExecutable: "/fixture/nimbus",
+        spawn: () => ({ pid: 4242, child }),
+      }),
+    ).rejects.toBeInstanceOf(ServerStartExitedError);
   });
 
   it("throws NimbusBinaryNotFoundError when ensure=true and no nimbus binary is reachable", async () => {

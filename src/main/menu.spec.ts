@@ -15,7 +15,7 @@ describe("buildAppMenu", () => {
     const menu = buildAppMenu("darwin", fakeHandlers());
     expect(menu).toHaveLength(5);
     expect(menu.map((m) => m.label)).toEqual([
-      "Nimbus",
+      "Nimbus Desktop",
       "File",
       "Edit",
       "View",
@@ -42,7 +42,9 @@ describe("buildAppMenu", () => {
       label?: string;
       click?: () => void;
     }>;
-    const quit = appSubmenu.find((item) => item.label === "Quit Nimbus");
+    const quit = appSubmenu.find(
+      (item) => item.label === "Quit Nimbus Desktop",
+    );
     quit?.click?.();
     expect(handlers.onQuit).toHaveBeenCalledOnce();
   });
@@ -78,7 +80,9 @@ describe("buildAppMenu", () => {
       label?: string;
       click?: () => void;
     }>;
-    const about = helpSubmenu.find((item) => item.label === "About Nimbus");
+    const about = helpSubmenu.find(
+      (item) => item.label === "About Nimbus Desktop",
+    );
     about?.click?.();
     expect(handlers.onAbout).toHaveBeenCalledOnce();
   });

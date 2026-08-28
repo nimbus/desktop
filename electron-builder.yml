@@ -9,7 +9,7 @@
 # resolved per-platform from env at sign time so dry-run builds (no
 # secrets) succeed locally and on the package-only matrix workflow.
 appId: dev.nimbus.desktop
-productName: nimbus-desktop
+productName: Nimbus Desktop
 # executableName drives the on-disk binary name on Linux. Without it
 # electron-builder falls back to a sanitized package.json `name`,
 # which for the scoped @nimbus/desktop strips `/` but keeps `@` and
@@ -43,6 +43,7 @@ extraMetadata:
 mac:
   category: public.app-category.developer-tools
   icon: buildResources/icon.icns
+  artifactName: "nimbus-desktop-${version}-${arch}-${os}.${ext}"
   # Hardened runtime is mandatory for Developer ID notarization. The
   # entitlements file allows V8 JIT + unsigned executable memory (both
   # required by Electron under the hardened runtime) + outbound
@@ -64,7 +65,7 @@ mac:
     - target: zip
       arch: universal
 dmg:
-  artifactName: "${productName}-${version}-${arch}.${ext}"
+  artifactName: "nimbus-desktop-${version}-${arch}.${ext}"
   writeUpdateInfo: true
 
 # ── Windows ────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
+  artifactName: "nimbus-desktop-Setup-${version}-${arch}.${ext}"
 
 # ── Linux ──────────────────────────────────────────────────────────
 linux:
@@ -113,10 +114,10 @@ linux:
       arch: x64
     - target: rpm
       arch: x64
-  artifactName: "${productName}-${version}-${arch}.${ext}"
+  artifactName: "nimbus-desktop-${version}-${arch}.${ext}"
 appImage:
-  artifactName: "${productName}-${version}-${arch}.${ext}"
+  artifactName: "nimbus-desktop-${version}-${arch}.${ext}"
 deb:
-  artifactName: "${productName}_${version}_${arch}.${ext}"
+  artifactName: "nimbus-desktop_${version}_${arch}.${ext}"
 rpm:
-  artifactName: "${productName}-${version}.${arch}.${ext}"
+  artifactName: "nimbus-desktop-${version}.${arch}.${ext}"
