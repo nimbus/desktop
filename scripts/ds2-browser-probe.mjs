@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 // DS2 browser-driven verification probe.
 //
-// Launches the built Electron app via Playwright's _electron API
-// against a live `nimbus start` running on 127.0.0.1:8088. Asserts:
-//   - the shell discovers the live server (no spawn) and the renderer
-//     reaches an http://127.0.0.1:8088/ui/ URL (DS2 contract: shell
-//     discovers via the server.json discovery file and loadURLs the
-//     resolved address — not the DS1 placeholder)
+// Launches the built Electron app via Playwright's _electron API. Asserts:
+//   - the shell discovers or starts Nimbus and the renderer reaches the
+//     server's loopback /ui/ URL. A desktop-owned server uses an ephemeral
+//     port, so the probe must not assume Nimbus's conventional port.
 //   - `typeof process` is "undefined" in the renderer (sandbox proof)
-//   - `window.nimbusShell.__version === "ds1"` (bridge still wired
+//   - `window.nimbusShell.__version === "ds5"` (bridge still wired
 //     after the URL flip; sandbox + bridge regressions are caught)
 //   - `window.nimbusShell` is frozen
 //
@@ -23,8 +21,6 @@ import { _electron as electron } from "playwright";
 
 const ENTRY = resolve("./dist/main/index.js");
 const SCREENSHOT_PATH = resolve("./.playwright-cli/ds2-probe.png");
-const EXPECTED_ORIGIN = "http://127.0.0.1:8088";
-
 let app;
 let exitCode = 0;
 try {
@@ -45,6 +41,7 @@ try {
   const win = await app.firstWindow({ timeout: 60_000 });
   await win.waitForLoadState("domcontentloaded", { timeout: 60_000 });
   const url = win.url();
+  const rendererUrl = new URL(url);
 
   const probe = await win.evaluate(() => ({
     processType: typeof globalThis.process,
@@ -57,8 +54,12 @@ try {
   }));
 
   const checks = {
-    url_loopback: url.startsWith(EXPECTED_ORIGIN),
-    url_under_ui: url.includes("/ui/"),
+    url_loopback:
+      rendererUrl.protocol === "http:" &&
+      rendererUrl.hostname === "127.0.0.1" &&
+      rendererUrl.port.length > 0,
+    url_under_ui: rendererUrl.pathname.startsWith("/ui/"),
+    url_matches_renderer: probe.location === url,
     sandbox_no_process: probe.processType === "undefined",
     sandbox_no_require: probe.requireType === "undefined",
     sandbox_no_buffer: probe.bufferType === "undefined",
