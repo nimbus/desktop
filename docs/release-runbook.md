@@ -6,7 +6,7 @@ expiry. The CI workflow that implements it is
 [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 (DS9).
 
-## TL;DR
+## Quick release
 
 ```sh
 # 1. Bump the version in package.json (semver).
@@ -41,7 +41,7 @@ For each platform runner:
 3. `electron-builder` packages → signs (`afterPack` flips fuses) →
    notarizes (`afterSign` runs notarize.cjs). Tag pushes publish through the
    `github` provider. Manual dispatch never publishes.
-4. **macOS only:** post-flight verification —
+4. **macOS only:** post-flight verification includes
    `codesign --verify --deep --strict`, `spctl --assess` (must
    report `accepted source=Notarized Developer ID`), and
    `xcrun stapler validate` against both the `.app` and the `.dmg`.
@@ -66,7 +66,7 @@ Use a dry-run tag only when the GitHub draft-release path also needs proof.
 ## Cutting a release
 
 1. **Confirm tip-of-main is green.** Both `package.yml` and `e2e.yml`
-   must be green on `main` for the SHA you're about to tag.
+   must be green on `main` for the SHA you are about to tag.
 2. **Bump version.** Edit `package.json` to the target semver,
    commit, push.
 3. **Tag.**
@@ -87,10 +87,9 @@ Use a dry-run tag only when the GitHub draft-release path also needs proof.
      manifests).
    - macOS post-flight log in the runner shows
      `spctl assess ... accepted source=Notarized Developer ID`.
-6. **Rollback path:** if a regression surfaces post-release, mark the
-   release `draft` in GitHub Releases — this pulls it from the
-   auto-update feed without deleting artifacts. The previous release
-   remains the latest stable for new installs.
+6. **Rollback path:** If a regression appears after release, mark the GitHub
+   Release as `draft`. This removes it from the auto-update feed without
+   deleting artifacts. The previous release remains the latest stable release.
 
 ## Dry-run before a real cut
 
@@ -110,15 +109,14 @@ gh release delete v0.0.0-dryrun-1 --yes
 
 ## Credential rotation
 
-Names only — values are never written to the repo, this runbook, or
-chat transcripts. All values live in GitHub Actions secrets.
+Names only: never write values to the repository, this runbook, or chat
+transcripts. All values live in GitHub Actions secrets.
 
 ### Apple (12-month cadence)
 
-The Apple Developer ID Application certificate expires every 5 years;
-the App Store Connect API key has no fixed expiry but is rotated on
-a 12-month cadence for hygiene. Rotation contact: original Apple
-Developer Program enrollee.
+The Apple Developer ID Application certificate expires every 5 years. The App
+Store Connect API key has no fixed expiry. Operators rotate the key every 12
+months. Rotation contact: original Apple Developer Program enrollee.
 
 To rotate:
 
@@ -146,7 +144,7 @@ To rotate the Developer ID Application certificate:
    ```
 4. Dry-run tag to confirm new signature chain validates.
 
-### Windows (Azure Trusted Signing — 6-month client secret cadence)
+### Windows (Azure Trusted Signing, 6-month client secret cadence)
 
 Not yet active (decision 002 deferred). When activated, the Azure
 Service Principal client secret expires every 6 months by Azure
@@ -167,8 +165,8 @@ The release workflow uses the auto-provisioned `GITHUB_TOKEN` with
 
 If audit policy requires a fine-grained PAT, set
 `DESKTOP_GH_RELEASE_TOKEN` and update `electron-builder.yml`'s
-`publish` provider config accordingly. Rotate every 6 months;
-contact: `nimbus/desktop` release manager.
+`publish` provider config accordingly. Rotate it every 6 months. Contact:
+`nimbus/desktop` release manager.
 
 ## Responding to a signing-cert expiry
 
@@ -177,16 +175,15 @@ If a release fails with `errSecCSResourcesNotSealed` or
 
 1. Check the cert expiry in the Apple Developer portal.
 2. If expired, follow the **Apple cert rotation** steps above.
-3. While the new cert is being provisioned (can take a business
-   day for Apple to issue), pause releases. Operators on the
-   currently-published version are unaffected — the published
-   `.app` ticket from notarization remains valid for the lifetime
-   of the staple, independent of cert validity.
+3. Apple can take one business day to issue the new certificate. Pause releases
+   during this period. The published version remains available to operators.
+   Its notarized `.app` ticket remains valid for the lifetime of the staple,
+   independent of certificate validity.
 4. Once the new cert is in place, run a dry-run tag.
 
 If a release fails with `notarytool: authentication failed`:
 
-1. The App Store Connect API key was revoked or rotated out of band.
+1. App Store Connect no longer accepts the API key.
 2. Generate a new key (steps above) and update the three Apple API
    secrets.
 
@@ -198,12 +195,12 @@ If a release fails with `Trusted Signing CLI: 401 Unauthorized`
 
 ## Reference: secret matrix
 
-The full list of secret names and what they're for lives in
+The full list of secret names and their purposes is in
 `scripts/verify-secrets.sh`. Run:
 
 ```sh
 npm run verify:secrets
 ```
 
-to confirm all REQUIRED secret names are present. The script never
-reads values — only names — and exits 0 when complete.
+to confirm that all required secret names are present. The script reads names
+only. It never reads secret values, and exits 0 when complete.
