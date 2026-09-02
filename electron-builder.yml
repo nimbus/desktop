@@ -99,6 +99,11 @@ linux:
   icon: buildResources/icon.png
   category: Development
   synopsis: "Native desktop shell for the Nimbus operator console."
+  # Keep package-manager and desktop-shell identities free of the spaces in
+  # productName. RPM rejects spaces in Name, and the desktop file must match
+  # Electron's app_id for running-window association.
+  packageName: nimbus-desktop
+  syncDesktopName: true
   # FpmTarget (used by both deb and rpm) requires a maintainer
   # contact; without it electron-builder errors out asking for
   # `author.email` in package.json. Pin it here to keep the JS

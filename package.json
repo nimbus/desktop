@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Native desktop shell for the Nimbus operator console.",
+  "desktopName": "nimbus-desktop",
   "type": "module",
   "main": "dist/main/index.js",
   "scripts": {
