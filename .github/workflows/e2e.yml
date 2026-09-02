@@ -60,16 +60,16 @@ jobs:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Checkout desktop
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout nimbus (sibling source for build)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: nimbus/nimbus
           path: nimbus-src
           fetch-depth: 1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -99,7 +99,7 @@ jobs:
       # release.yml proves clean.
       - name: Set up Windows Perl
         if: runner.os == 'Windows'
-        uses: shogo82148/actions-setup-perl@v1
+        uses: shogo82148/actions-setup-perl@a198315ec4e9244f206879ea7b63078003aec8a6 # v1
         with:
           distribution: strawberry
           perl-version: "5.42"
@@ -113,7 +113,7 @@ jobs:
           "OPENSSL_SRC_PERL=$perlExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Cache cargo build (nimbus)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: nimbus-src -> target
           key: nimbus-${{ matrix.name }}
@@ -141,7 +141,7 @@ jobs:
           bin_path="target/release/${{ matrix.nimbus_bin_subpath }}"
           if [ ! -f "$bin_path" ]; then
             echo "Expected nimbus binary at $bin_path after build:"
-            ls -la target/release | head -20
+            find target/release -mindepth 1 -maxdepth 1 -print | head -20
             exit 1
           fi
           # On Windows runners the default bash is Git Bash, where `pwd`
@@ -184,7 +184,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces-${{ matrix.name }}
           path: |
