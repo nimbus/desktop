@@ -34,8 +34,10 @@ For each platform runner:
 1. Checkout + Node 22 + `npm ci` + lint + typecheck + unit tests.
 2. **macOS only:** decode `DESKTOP_APPLE_CERT_P12` to a temp `.p12`,
    import it into a job-scoped keychain, and give `codesign` access to the
-   private key. Decode `DESKTOP_APPLE_API_KEY` (base64 `.p8`) to a temp file
-   and export `DESKTOP_APPLE_API_KEY_PATH` for `scripts/notarize.cjs`.
+   private key. Select the certificate through
+   `DESKTOP_APPLE_SIGNING_IDENTITY`. Decode `DESKTOP_APPLE_API_KEY` (base64
+   `.p8`) to a temp file and export `DESKTOP_APPLE_API_KEY_PATH` for
+   `scripts/notarize.cjs`.
 3. `electron-builder` packages → signs (`afterPack` flips fuses) →
    notarizes (`afterSign` runs notarize.cjs). Tag pushes publish through the
    `github` provider. Manual dispatch never publishes.

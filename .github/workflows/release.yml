@@ -102,11 +102,22 @@ jobs:
         env:
           DESKTOP_APPLE_CERT_P12: ${{ secrets.DESKTOP_APPLE_CERT_P12 }}
           DESKTOP_APPLE_CERT_P12_PASSWORD: ${{ secrets.DESKTOP_APPLE_CERT_P12_PASSWORD }}
+          DESKTOP_APPLE_SIGNING_IDENTITY: ${{ secrets.DESKTOP_APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           if [ -z "${DESKTOP_APPLE_CERT_P12:-}" ]; then
             echo "DESKTOP_APPLE_CERT_P12 not present; macOS will package unsigned"
             exit 0
+          fi
+          identity_prefix="Developer ID Application: "
+          if [[ "${DESKTOP_APPLE_SIGNING_IDENTITY:-}" != "${identity_prefix}"* ]]; then
+            echo "::error::DESKTOP_APPLE_SIGNING_IDENTITY must contain the full Developer ID Application identity."
+            exit 1
+          fi
+          identity_name="${DESKTOP_APPLE_SIGNING_IDENTITY#"${identity_prefix}"}"
+          if [[ -z "$identity_name" ]]; then
+            echo "::error::DESKTOP_APPLE_SIGNING_IDENTITY has no identity name."
+            exit 1
           fi
           cert_path="$RUNNER_TEMP/desktop-apple-cert.p12"
           # base64 -d on macOS is happy with single-line input; the
@@ -155,16 +166,14 @@ jobs:
           # Hand the keychain to subsequent steps for cleanup and audit. Tell
           # electron-builder to use the custom keychain. Do not set CSC_LINK;
           # that path imports the key again with the wrong partition list.
-          # Pin the cert by name so electron-builder picks ours even
-          # if the runner's default keychain happens to contain
-          # another Developer ID identity. electron-builder rejects
-          # CSC_NAME values that include the "Developer ID Application:"
-          # prefix — it inserts that prefix itself when querying the
-          # keychain. Use only the operator-name portion.
+          # Pin the certificate from the rotation-owned secret so a new owner
+          # identity does not require a source edit. electron-builder rejects
+          # the "Developer ID Application:" prefix and supplies it during the
+          # lookup, so CSC_NAME receives the suffix only.
           {
             echo "DESKTOP_BUILD_KEYCHAIN=$kc"
             echo "CSC_IDENTITY_AUTO_DISCOVERY=true"
-            echo "CSC_NAME=Jack Spirou"
+            echo "CSC_NAME=$identity_name"
           } >> "$GITHUB_ENV"
 
       # Verify the keychain we just built actually yields a codesigning-
