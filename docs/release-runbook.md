@@ -56,7 +56,7 @@ artifacts. It uploads the installers only as workflow artifacts and does not
 create or update a GitHub Release.
 
 ```sh
-gh workflow run release.yml --ref <branch-or-commit>
+gh workflow run release.yml --ref <branch-or-tag>
 ```
 
 Use a dry-run tag only when the GitHub draft-release path also needs proof.
