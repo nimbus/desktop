@@ -99,10 +99,8 @@ linux:
   icon: buildResources/icon.png
   category: Development
   synopsis: "Native desktop shell for the Nimbus operator console."
-  # Keep package-manager and desktop-shell identities free of the spaces in
-  # productName. RPM rejects spaces in Name, and the desktop file must match
-  # Electron's app_id for running-window association.
-  packageName: nimbus-desktop
+  # Keep the desktop-shell identity free of the spaces in productName. The
+  # desktop file must match Electron's app_id for running-window association.
   syncDesktopName: true
   # FpmTarget (used by both deb and rpm) requires a maintainer
   # contact; without it electron-builder errors out asking for
@@ -123,6 +121,9 @@ linux:
 appImage:
   artifactName: "nimbus-desktop-${version}-${arch}.${ext}"
 deb:
+  # FPM package names cannot contain the spaces in productName.
+  packageName: nimbus-desktop
   artifactName: "nimbus-desktop_${version}_${arch}.${ext}"
 rpm:
+  packageName: nimbus-desktop
   artifactName: "nimbus-desktop-${version}.${arch}.${ext}"

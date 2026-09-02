@@ -2,6 +2,7 @@
   "name": "@nimbus/desktop",
   "version": "0.1.0",
   "private": true,
+  "author": "Nimbus <ops@nimbus.dev>",
   "description": "Native desktop shell for the Nimbus operator console.",
   "desktopName": "nimbus-desktop",
   "type": "module",
