@@ -18,22 +18,17 @@ name: release
 #            scripts/sign-windows.cjs no-ops without the Azure
 #            Trusted Signing env vars.
 #
-# Dry-run mode: pushing a tag matching `v0.0.0-dryrun-*` produces
-# artifacts and uploads them to a draft release that the operator
-# can inspect + delete. This proves the wiring without committing
-# to a real version. Real release tags (v0.x.y, v1.x.y) publish a
-# non-draft release and add the auto-update manifests.
+# Manual dispatch packages, signs, notarizes, staples, and uploads workflow
+# artifacts without publishing a GitHub Release. A pushed tag matching
+# `v0.0.0-dryrun-*` publishes a draft release for release-channel testing.
+# Real release tags (v0.x.y, v1.x.y) publish a non-draft release and add the
+# auto-update manifests.
 
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g. v0.0.0-dryrun-1). Created if not present."
-        required: true
-        type: string
 
 permissions:
   # Required for electron-builder publish=github to create releases
@@ -133,7 +128,14 @@ jobs:
           # `security find-identity -v -p codesigning` (which it runs
           # without a keychain argument under auto-discovery) can see
           # the identity.
-          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          existing_keychains=()
+          while IFS= read -r keychain; do
+            keychain="$(printf '%s' "$keychain" | sed 's/^[[:space:]]*"//; s/"$//')"
+            if [[ -n "$keychain" ]]; then
+              existing_keychains+=("$keychain")
+            fi
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$kc" "${existing_keychains[@]}"
           # `-T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productbuild`
           # authorizes those tools to access the private key without
           # interactive prompts; combined with the partition list
@@ -150,20 +152,20 @@ jobs:
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s -k "$kc_pw" "$kc" >/dev/null
-          # Hand the keychain to subsequent steps for cleanup + audit.
-          echo "DESKTOP_BUILD_KEYCHAIN=$kc" >> "$GITHUB_ENV"
-          # Tell electron-builder to auto-discover the identity from
-          # the search list (= our custom keychain). Do NOT set
-          # CSC_LINK here — that would trigger electron-builder's
-          # internal import with the wrong partition list.
-          echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
+          # Hand the keychain to subsequent steps for cleanup and audit. Tell
+          # electron-builder to use the custom keychain. Do not set CSC_LINK;
+          # that path imports the key again with the wrong partition list.
           # Pin the cert by name so electron-builder picks ours even
           # if the runner's default keychain happens to contain
           # another Developer ID identity. electron-builder rejects
           # CSC_NAME values that include the "Developer ID Application:"
           # prefix — it inserts that prefix itself when querying the
           # keychain. Use only the operator-name portion.
-          echo "CSC_NAME=Jack Spirou" >> "$GITHUB_ENV"
+          {
+            echo "DESKTOP_BUILD_KEYCHAIN=$kc"
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=true"
+            echo "CSC_NAME=Jack Spirou"
+          } >> "$GITHUB_ENV"
 
       # Verify the keychain we just built actually yields a codesigning-
       # eligible Developer ID Application identity before we burn 8+
@@ -202,17 +204,17 @@ jobs:
           chmod 600 "$key_path"
           # scripts/notarize.cjs reads these four env vars; the .p8
           # path is the only derived value, the rest forward verbatim.
-          echo "DESKTOP_APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
-          echo "DESKTOP_APPLE_API_KEY_ID=$DESKTOP_APPLE_API_KEY_ID" >> "$GITHUB_ENV"
-          echo "DESKTOP_APPLE_API_ISSUER=$DESKTOP_APPLE_API_ISSUER" >> "$GITHUB_ENV"
-          echo "DESKTOP_APPLE_TEAM_ID=$DESKTOP_APPLE_TEAM_ID" >> "$GITHUB_ENV"
+          {
+            echo "DESKTOP_APPLE_API_KEY_PATH=$key_path"
+            echo "DESKTOP_APPLE_API_KEY_ID=$DESKTOP_APPLE_API_KEY_ID"
+            echo "DESKTOP_APPLE_API_ISSUER=$DESKTOP_APPLE_API_ISSUER"
+            echo "DESKTOP_APPLE_TEAM_ID=$DESKTOP_APPLE_TEAM_ID"
+          } >> "$GITHUB_ENV"
 
       # ── Package + sign + notarize + publish ────────────────────
-      # `--publish onTagOrDraft` tells electron-builder to publish
-      # only on tag pushes (or explicit draft requests), never on
-      # branch pushes — defense-in-depth against an accidental
-      # workflow trigger uploading to a live release.
-      - name: Package + publish
+      # Manual dispatch is the non-publishing signing and notarization proof.
+      # Tag pushes retain the release path through `onTagOrDraft`.
+      - name: Package and publish when tagged
         shell: bash
         run: |
           set -euo pipefail
@@ -225,8 +227,13 @@ jobs:
             package:win)   flag="--win" ;;
             *) echo "unknown matrix target: ${{ matrix.target }}" >&2; exit 1 ;;
           esac
+          publish_mode="onTagOrDraft"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            publish_mode="never"
+          fi
+          echo "electron-builder publish mode: ${publish_mode}"
           npm run build:main
-          npx electron-builder $flag --publish onTagOrDraft
+          npx electron-builder "${flag}" --publish "${publish_mode}"
 
       - name: Audit installer sizes
         run: node scripts/check-installer-sizes.cjs release

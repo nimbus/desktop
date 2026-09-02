@@ -33,12 +33,12 @@ For each platform runner:
 
 1. Checkout + Node 22 + `npm ci` + lint + typecheck + unit tests.
 2. **macOS only:** decode `DESKTOP_APPLE_CERT_P12` to a temp `.p12`,
-   point electron-builder at it via `CSC_LINK` + `CSC_KEY_PASSWORD`.
-   Decode `DESKTOP_APPLE_API_KEY` (base64 `.p8`) to a temp file and
-   export `DESKTOP_APPLE_API_KEY_PATH` for `scripts/notarize.cjs`.
+   import it into a job-scoped keychain, and give `codesign` access to the
+   private key. Decode `DESKTOP_APPLE_API_KEY` (base64 `.p8`) to a temp file
+   and export `DESKTOP_APPLE_API_KEY_PATH` for `scripts/notarize.cjs`.
 3. `electron-builder` packages → signs (`afterPack` flips fuses) →
-   notarizes (`afterSign` runs notarize.cjs) → publishes via the
-   `github` provider.
+   notarizes (`afterSign` runs notarize.cjs). Tag pushes publish through the
+   `github` provider. Manual dispatch never publishes.
 4. **macOS only:** post-flight verification —
    `codesign --verify --deep --strict`, `spctl --assess` (must
    report `accepted source=Notarized Developer ID`), and
@@ -47,6 +47,19 @@ For each platform runner:
 
 Windows packaging produces unsigned NSIS installers while decision 002
 is `deferred`. Linux packaging produces unsigned AppImage / deb / rpm.
+
+## Notarization proof without publishing
+
+Run the release workflow manually against the commit to verify. A manual run
+uses the configured Apple credentials to sign, notarize, and staple the macOS
+artifacts. It uploads the installers only as workflow artifacts and does not
+create or update a GitHub Release.
+
+```sh
+gh workflow run release.yml --ref <branch-or-commit>
+```
+
+Use a dry-run tag only when the GitHub draft-release path also needs proof.
 
 ## Cutting a release
 
