@@ -92,12 +92,12 @@ The shell could not find a running `nimbus`. Confirm:
 ```sh
 nimbus --version            # is it installed?
 nimbus start                # start it manually
-ls ~/.config/nimbus/server.json  # was server.json written?
+ls "${XDG_RUNTIME_DIR:-$HOME/.local/state}/nimbus/server.json"
 ```
 
-On macOS the discovery path is
-`~/Library/Application Support/nimbus/server.json`. On Windows it is
-`%APPDATA%\nimbus\server.json`.
+On macOS, Nimbus uses `$TMPDIR/nimbus/server.json`. Without `TMPDIR`, it uses
+`~/Library/Application Support/nimbus/run/server.json`. On Windows, it uses
+`%LOCALAPPDATA%\nimbus\run\server.json`.
 
 ### "Update download failed"
 
@@ -122,7 +122,7 @@ discovered address. Restart with `nimbus start`.
 | App settings            | `~/Library/Application Support/nimbus-desktop/`                                  | `~/.config/nimbus-desktop/`                          | `%APPDATA%\nimbus-desktop\`                                       |
 | Logs                    | `~/Library/Logs/nimbus-desktop/`                                                  | `~/.config/nimbus-desktop/logs/`                     | `%APPDATA%\nimbus-desktop\logs\`                                  |
 | Updater cache           | `~/Library/Caches/nimbus-desktop-updater/`                                       | `~/.cache/nimbus-desktop-updater/`                   | `%LOCALAPPDATA%\nimbus-desktop-updater\`                          |
-| `server.json` discovery | `~/Library/Application Support/nimbus/server.json` (read-only — owned by nimbus) | `~/.config/nimbus/server.json` (read-only)           | `%APPDATA%\nimbus\server.json` (read-only)                        |
+| `server.json` discovery | `$TMPDIR/nimbus/server.json`; fallback: `~/Library/Application Support/nimbus/run/server.json` (read-only — owned by Nimbus) | `$XDG_RUNTIME_DIR/nimbus/server.json`; fallback: `~/.local/state/nimbus/run/server.json` (read-only) | `%LOCALAPPDATA%\nimbus\run\server.json` (read-only)              |
 
 ## Uninstall
 

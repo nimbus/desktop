@@ -115,7 +115,7 @@ Per-platform locations the shell writes to:
 | ----------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
 | App settings (Electron) | `~/Library/Application Support/nimbus-desktop/`                                   | `~/.config/nimbus-desktop/`                          | `%APPDATA%\nimbus-desktop\`                                       |
 | Updater cache           | `~/Library/Caches/nimbus-desktop-updater/`                                       | `~/.cache/nimbus-desktop-updater/`                   | `%LOCALAPPDATA%\nimbus-desktop-updater\`                          |
-| Server discovery        | `~/Library/Application Support/nimbus/server.json` (read-only — owned by nimbus) | `~/.config/nimbus/server.json` (read-only)           | `%APPDATA%\nimbus\server.json` (read-only)                        |
+| Server discovery        | `$TMPDIR/nimbus/server.json`; fallback: `~/Library/Application Support/nimbus/run/server.json` (read-only — owned by Nimbus) | `$XDG_RUNTIME_DIR/nimbus/server.json`; fallback: `~/.local/state/nimbus/run/server.json` (read-only) | `%LOCALAPPDATA%\nimbus\run\server.json` (read-only)              |
 
 The shell **reads** `server.json` to discover the nimbus instance; it
 never writes there. Server-side state is owned by `nimbus/nimbus`.
