@@ -18,7 +18,8 @@ one. Install the CLI first:
 
 ```bash
 # macOS / Linux (Homebrew)
-brew install nimbus/tap/nimbus
+brew trust --cask nimbus/tap/nimbus
+brew install --cask nimbus/tap/nimbus
 ```
 
 Other platforms and direct downloads:
@@ -29,6 +30,7 @@ Other platforms and direct downloads:
 **macOS — Homebrew Cask (recommended)**
 
 ```bash
+brew trust --cask nimbus/tap/nimbus-desktop
 brew install --cask nimbus/tap/nimbus-desktop
 ```
 
