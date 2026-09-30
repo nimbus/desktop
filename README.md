@@ -154,7 +154,7 @@ in `nimbus/nimbus`.
 
 Stack:
 
-- Electron 42, electron-builder 26, electron-updater 6
+- Electron 44, electron-builder 26, electron-updater 6
 - TypeScript 6 strict, Biome 2.4
 - Vitest (unit), Playwright (packaged-shell E2E)
 
