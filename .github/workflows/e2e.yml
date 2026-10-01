@@ -51,7 +51,9 @@ jobs:
             name: win-x64
             e2e_runner_prefix: ""
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # An uncached nimbus release build (LTO, one codegen unit) takes about
+    # 30 minutes on macOS and longer on Windows. Later runs hit the cache.
+    timeout-minutes: 120
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       # Match the nimbus release workflow's git-fetch strategy so
