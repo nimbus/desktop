@@ -51,7 +51,9 @@ jobs:
             name: win-x64
             e2e_runner_prefix: ""
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # An uncached nimbus build takes most of this budget on the macOS
+    # runner. Later runs restore the dependency cache.
+    timeout-minutes: 180
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       # Match the nimbus release workflow's git-fetch strategy so
@@ -68,6 +70,14 @@ jobs:
           repository: nimbus/nimbus
           path: nimbus-src
           fetch-depth: 1
+
+      # TypeScript 6 searches parent directories for a tsconfig.json, and
+      # nimbus's package builder passes entry files to tsc on the command
+      # line. Under the desktop tsconfig.json that fails with TS5112, so
+      # build nimbus outside the desktop tree.
+      - name: Move nimbus source out of the desktop tree
+        shell: bash
+        run: mv nimbus-src "$RUNNER_TEMP/nimbus-src"
 
       - uses: actions/setup-node@v4
         with:
@@ -115,12 +125,21 @@ jobs:
       - name: Cache cargo build (nimbus)
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: nimbus-src -> target
+          workspaces: ${{ runner.temp }}/nimbus-src -> target
           key: nimbus-${{ matrix.name }}
+          # Save the compiled dependencies even when the build times out,
+          # so the next run does not start from zero.
+          cache-on-failure: true
 
       - name: Build nimbus from source
         shell: bash
-        working-directory: ${{ github.workspace }}/nimbus-src
+        working-directory: ${{ runner.temp }}/nimbus-src
+        env:
+          # The e2e binary is a test fixture, not the shipped artifact.
+          # Fat LTO with one codegen unit stalls nimbus-bin past 90
+          # minutes on the macOS runner. Thin LTO matches the nimbus
+          # release workflow's constrained-runner build.
+          CARGO_PROFILE_RELEASE_LTO: thin
         run: |
           set -euo pipefail
           cargo --version
@@ -132,6 +151,10 @@ jobs:
           # local `make release` target.
           npm ci
           npm run build -w packages/nimbus-ui
+          # nimbus-assets' build.rs requires the staged embedded package
+          # payload. Mirrors the `build-packages` prerequisite of the
+          # local `make release` target.
+          npm run build:embedded-packages
           # nimbus-bin is the binary crate; build it in release mode to
           # match the dev-loop convention the helper looks for.
           cargo build --release -p nimbus-bin
