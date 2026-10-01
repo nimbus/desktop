@@ -6,14 +6,16 @@
 // Per-artifact budgets:
 //   - per-arch installer (.dmg/.exe/.AppImage/.deb/.rpm) < 200 MiB
 //   - per-arch zip distribution archive            < 200 MiB
-//   - macOS universal installer (carries arm64 + x64 Electron) < 250 MiB
+//   - multi-arch installer (carries arm64 + x64 Electron)       < 250 MiB
 //   - unpacked app.asar                                         <  80 MiB
 //
-// The universal-mac headroom is wider because the DMG carries both
-// arm64 and x64 Electron payloads (~100 MiB compressed Electron alone)
-// merged via @electron/universal. Linux/Windows installers stay on
-// the per-arch budget because the plan ships per-arch NSIS / AppImage
-// / deb / rpm artifacts.
+// The multi-arch headroom is wider because the installer carries both
+// arm64 and x64 Electron payloads (~100 MiB compressed Electron alone).
+// Two artifacts are multi-arch: the macOS universal DMG / ZIP merged via
+// @electron/universal, and the combined NSIS installer that
+// electron-builder emits without an arch suffix next to the per-arch
+// `-x64` / `-arm64` installers when `nsis` targets both arches.
+// Linux AppImage / deb / rpm artifacts are per-arch.
 //
 // Usage:
 //   node scripts/check-installer-sizes.cjs <release-dir>
@@ -27,7 +29,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 const INSTALLER_BUDGET_BYTES = 200 * 1024 * 1024;
-const UNIVERSAL_INSTALLER_BUDGET_BYTES = 250 * 1024 * 1024;
+const MULTI_ARCH_INSTALLER_BUDGET_BYTES = 250 * 1024 * 1024;
 const ASAR_BUDGET_BYTES = 80 * 1024 * 1024;
 
 const INSTALLER_EXTENSIONS = new Set([
@@ -39,9 +41,14 @@ const INSTALLER_EXTENSIONS = new Set([
   ".rpm",
 ]);
 
+function isMultiArchInstaller(name) {
+  if (/-universal/.test(name)) return true;
+  return path.extname(name) === ".exe" && !/-(x64|arm64)\.exe$/.test(name);
+}
+
 function installerBudget(name) {
-  return /-universal/.test(name)
-    ? UNIVERSAL_INSTALLER_BUDGET_BYTES
+  return isMultiArchInstaller(name)
+    ? MULTI_ARCH_INSTALLER_BUDGET_BYTES
     : INSTALLER_BUDGET_BYTES;
 }
 
