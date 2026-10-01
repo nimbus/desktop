@@ -132,6 +132,10 @@ jobs:
           # local `make release` target.
           npm ci
           npm run build -w packages/nimbus-ui
+          # nimbus-assets' build.rs requires the staged embedded package
+          # payload. Mirrors the `build-packages` prerequisite of the
+          # local `make release` target.
+          npm run build:embedded-packages
           # nimbus-bin is the binary crate; build it in release mode to
           # match the dev-loop convention the helper looks for.
           cargo build --release -p nimbus-bin
