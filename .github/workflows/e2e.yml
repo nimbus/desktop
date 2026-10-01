@@ -69,6 +69,14 @@ jobs:
           path: nimbus-src
           fetch-depth: 1
 
+      # TypeScript 6 searches parent directories for a tsconfig.json, and
+      # nimbus's package builder passes entry files to tsc on the command
+      # line. Under the desktop tsconfig.json that fails with TS5112, so
+      # build nimbus outside the desktop tree.
+      - name: Move nimbus source out of the desktop tree
+        shell: bash
+        run: mv nimbus-src "$RUNNER_TEMP/nimbus-src"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -115,12 +123,12 @@ jobs:
       - name: Cache cargo build (nimbus)
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: nimbus-src -> target
+          workspaces: ${{ runner.temp }}/nimbus-src -> target
           key: nimbus-${{ matrix.name }}
 
       - name: Build nimbus from source
         shell: bash
-        working-directory: ${{ github.workspace }}/nimbus-src
+        working-directory: ${{ runner.temp }}/nimbus-src
         run: |
           set -euo pipefail
           cargo --version
