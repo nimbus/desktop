@@ -51,9 +51,9 @@ jobs:
             name: win-x64
             e2e_runner_prefix: ""
     runs-on: ${{ matrix.os }}
-    # An uncached nimbus release build (LTO, one codegen unit) takes about
-    # 30 minutes on macOS and longer on Windows. Later runs hit the cache.
-    timeout-minutes: 120
+    # An uncached nimbus build takes most of this budget on the macOS
+    # runner. Later runs restore the dependency cache.
+    timeout-minutes: 180
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       # Match the nimbus release workflow's git-fetch strategy so
@@ -127,10 +127,19 @@ jobs:
         with:
           workspaces: ${{ runner.temp }}/nimbus-src -> target
           key: nimbus-${{ matrix.name }}
+          # Save the compiled dependencies even when the build times out,
+          # so the next run does not start from zero.
+          cache-on-failure: true
 
       - name: Build nimbus from source
         shell: bash
         working-directory: ${{ runner.temp }}/nimbus-src
+        env:
+          # The e2e binary is a test fixture, not the shipped artifact.
+          # Fat LTO with one codegen unit stalls nimbus-bin past 90
+          # minutes on the macOS runner. Thin LTO matches the nimbus
+          # release workflow's constrained-runner build.
+          CARGO_PROFILE_RELEASE_LTO: thin
         run: |
           set -euo pipefail
           cargo --version
