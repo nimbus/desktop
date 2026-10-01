@@ -28,7 +28,7 @@ const REPO_ROOT = resolve(HERE, "..", "..");
 //   2. Serve a CSP header with `script-src 'self'`.
 //   3. Render the auth form (auth-token input).
 //   4. Accept a valid token via POST /ui/auth/session.
-//   5. Render the overview tab with all 6 count panels.
+//   5. Render the overview with the first-run onboarding.
 //   6. Open the ⌘K command palette.
 //   7. Open the ⌘\ system tenant lens.
 
@@ -99,7 +99,7 @@ test.describe("DS7 critical path", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  test("overview tab renders all 6 count panels after auth", async () => {
+  test("overview renders the first-run onboarding after auth", async () => {
     const token = server.readToken();
     const browser = await chromium.connectOverCDP(shell.cdpHttpEndpoint);
     try {
@@ -119,16 +119,25 @@ test.describe("DS7 critical path", () => {
       expect(ok).toBe(true);
       await page.goto(`${server.baseURL}/ui/`);
       await expect(page.getByTestId("page-overview")).toBeVisible();
-      for (const id of [
-        "overview-count-machines",
-        "overview-count-services",
-        "overview-count-tenants",
-        "overview-count-tables",
-        "overview-count-functions",
-        "overview-count-runs",
-      ]) {
-        await expect(page.getByTestId(id)).toBeVisible();
+      // The headline reads the live status and inventory queries, so this
+      // sentence proves the session reached the server and it reported
+      // healthy with nothing deployed.
+      await expect(page.getByTestId("overview-sentence")).toHaveText(
+        "The server is up and waiting for its first app.",
+      );
+      // An empty scratch server shows the first-run onboarding in place of
+      // the stats row and the recent runs table.
+      await expect(page.getByTestId("overview-onboarding")).toBeVisible();
+      await expect(page.getByTestId("overview-onboarding-title")).toHaveText(
+        "Nothing here yet",
+      );
+      for (const step of ["install", "dev", "run"]) {
+        await expect(
+          page.getByTestId(`overview-onboarding-step-${step}`),
+        ).toHaveAttribute("data-done", "false");
       }
+      await expect(page.getByTestId("overview-connect")).toBeVisible();
+      await expect(page.getByTestId("overview-stats")).toHaveCount(0);
 
       // ⌘K palette + ⌘\ tenant lens. Accelerators are routed through
       // Electron's menu (DS4) AND a renderer-side keydown handler,
